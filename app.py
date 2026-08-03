@@ -111,28 +111,88 @@ def _download_model(model_name, url):
     return path
 
 
-class _HATAdapter(torch.nn.Module):
-    """Wraps HAT to pad input to window_size multiples, as RealESRGANer tiles may not be."""
-    def __init__(self, hat_model):
-        super().__init__()
-        self.hat = hat_model
-        self.window_size = hat_model.window_size
-        self.scale = hat_model.upscale
+class _HATUpsampler:
+    """Minimal upsampler for HAT — same interface as RealESRGANer."""
 
-    def forward(self, x):
-        h, w = x.shape[2], x.shape[3]
-        ws = self.window_size
-        ph = (ws - h % ws) % ws
-        pw = (ws - w % ws) % ws
-        if ph or pw:
-            x = torch.nn.functional.pad(x, (0, pw, 0, ph), mode='reflect')
-        out = self.hat(x)
-        return out[:, :, :h * self.scale, :w * self.scale]
+    def __init__(self, hat_model: torch.nn.Module, scale: int):
+        self.model = hat_model
+        self.scale = scale
+        self.tile_size = 0   # set by caller, same as RealESRGANer
+        self.tile_pad = 32
+
+    def enhance(self, img_bgr, outscale=None):
+        scale = outscale or self.scale
+        h, w = img_bgr.shape[:2]
+        max_val = 65535.0 if img_bgr.max() > 256 else 255.0
+
+        # BGR uint8/16 → RGB float [0,1] NCHW
+        img_f = img_bgr.astype(np.float32) / max_val
+        img_rgb = img_f[:, :, ::-1].copy()
+        t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0)
+        if _USE_HALF:
+            t = t.half()
+        t = t.to(_DEVICE)
+
+        ws = self.model.window_size  # 16
+
+        with torch.no_grad():
+            if self.tile_size > 0:
+                out = self._tile_process(t, ws)
+            else:
+                # Pad to window_size multiple, run, unpad
+                ph = (ws - h % ws) % ws
+                pw = (ws - w % ws) % ws
+                if ph or pw:
+                    t = torch.nn.functional.pad(t, (0, pw, 0, ph), mode='reflect')
+                out = self.model(t)
+                out = out[:, :, :h * scale, :w * scale]
+
+        # NCHW → HWC BGR uint8/16
+        out_np = out.squeeze(0).float().clamp(0, 1).cpu().numpy()
+        out_np = (out_np.transpose(1, 2, 0)[:, :, ::-1] * max_val).round()
+        dtype = np.uint16 if max_val > 255 else np.uint8
+        return out_np.clip(0, max_val).astype(dtype), None
+
+    def _tile_process(self, t, ws):
+        _, _, h, w = t.shape
+        scale = self.scale
+        tile = self.tile_size
+        pad = self.tile_pad
+        out = torch.zeros(1, 3, h * scale, w * scale, dtype=t.dtype, device=t.device)
+
+        tiles_x = math.ceil(w / tile)
+        tiles_y = math.ceil(h / tile)
+        for yi in range(tiles_y):
+            for xi in range(tiles_x):
+                x0 = max(xi * tile - pad, 0)
+                x1 = min((xi + 1) * tile + pad, w)
+                y0 = max(yi * tile - pad, 0)
+                y1 = min((yi + 1) * tile + pad, h)
+                tile_in = t[:, :, y0:y1, x0:x1]
+
+                # Pad tile to window_size multiple
+                th, tw = tile_in.shape[2], tile_in.shape[3]
+                tph = (ws - th % ws) % ws
+                tpw = (ws - tw % ws) % ws
+                if tph or tpw:
+                    tile_in = torch.nn.functional.pad(tile_in, (0, tpw, 0, tph), mode='reflect')
+
+                tile_out = self.model(tile_in)
+                tile_out = tile_out[:, :, :th * scale, :tw * scale]
+
+                # Destination (strip padding contribution)
+                ox0 = (x0 if xi == 0 else x0 + pad) * scale
+                oy0 = (y0 if yi == 0 else y0 + pad) * scale
+                sx0 = 0 if xi == 0 else pad * scale
+                sy0 = 0 if yi == 0 else pad * scale
+                ox1 = ox0 + tile_out.shape[3] - sx0
+                oy1 = oy0 + tile_out.shape[2] - sy0
+                out[:, :, oy0:oy1, ox0:ox1] = tile_out[:, :, sy0:, sx0:]
+        return out
 
 
 def _get_upsampler(model_key: str):
     if model_key not in MODEL_CACHE:
-        from realesrgan import RealESRGANer
         name, url, num_blocks, scale, is_hat = MODELS[model_key]
         path = _download_model(name, url)
 
@@ -145,15 +205,22 @@ def _get_upsampler(model_key: str):
                 num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2,
                 upsampler='pixelshuffle', resi_connection='1conv',
             )
-            model = _HATAdapter(hat)
+            loadnet = torch.load(str(path), map_location='cpu')
+            key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
+            hat.load_state_dict(loadnet[key] if key else loadnet, strict=True)
+            hat.eval()
+            if _USE_HALF:
+                hat = hat.half()
+            hat = hat.to(_DEVICE)
+            MODEL_CACHE[model_key] = _HATUpsampler(hat, scale)
         else:
             from basicsr.archs.rrdbnet_arch import RRDBNet
+            from realesrgan import RealESRGANer
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
                             num_block=num_blocks, num_grow_ch=32, scale=scale)
-
-        MODEL_CACHE[model_key] = RealESRGANer(
-            scale=scale, model_path=str(path), model=model,
-            tile=0, tile_pad=10, pre_pad=0, half=_USE_HALF)
+            MODEL_CACHE[model_key] = RealESRGANer(
+                scale=scale, model_path=str(path), model=model,
+                tile=0, tile_pad=10, pre_pad=0, half=_USE_HALF)
     return MODEL_CACHE[model_key]
 
 
