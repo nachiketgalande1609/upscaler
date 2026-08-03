@@ -2,9 +2,14 @@
 """CLI tool to upscale images using Real-ESRGAN."""
 
 import argparse
+import os
 import sys
 import urllib.request
 from pathlib import Path
+
+import torch
+_cores = os.cpu_count() or 4
+torch.set_num_threads(max(1, _cores // 2))
 
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.webp'}
 

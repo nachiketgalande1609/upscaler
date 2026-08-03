@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import math
+import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import cv2
 import gradio as gr
 import numpy as np
+import torch
+
+# Limit PyTorch to half the CPU cores so the laptop stays responsive.
+# Change this number if you want faster processing (more cores = more heat/lag).
+_physical_cores = os.cpu_count() or 4
+_torch_threads = max(1, _physical_cores // 2)
+torch.set_num_threads(_torch_threads)
+print(f"Using {_torch_threads}/{_physical_cores} CPU threads for inference.")
 
 MODEL_CACHE: dict = {}
 MODEL_DIR = Path("models")
@@ -75,28 +87,63 @@ def _get_upsampler(scale: int):
 def upscale_single(image, scale_choice: str, tile_choice: str):
     if image is None:
         gr.Warning("Please upload an image first.")
-        yield None, None, ""
+        yield gr.update(), gr.update(), ""
         return
 
     scale = int(scale_choice[0])
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
-    yield None, None, "Step 1/3 — Loading model..."
+    yield gr.update(), gr.update(), "Step 1/3 — Loading model..."
     upsampler = _get_upsampler(scale)
     upsampler.tile = tile
 
     img_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     h, w = img_bgr.shape[:2]
 
-    yield None, None, f"Step 2/3 — Upscaling {w}x{h} at {scale}x (may take a minute on CPU)..."
-    try:
-        output_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
-    except Exception as exc:
-        raise gr.Error(f"Upscaling failed: {exc}")
+    if tile > 0:
+        # Calculate total tiles so we can show Tile X/N progress.
+        total_tiles = math.ceil(w / tile) * math.ceil(h / tile)
+
+        # Forward hook fires once per tile inside enhance().
+        tile_counter = [0]
+        def _hook(module, inp, out):
+            tile_counter[0] += 1
+        hook = upsampler.model.register_forward_hook(_hook)
+
+        # Run enhance() in a background thread so the generator keeps yielding.
+        result: list = [None]
+        exc_holder: list = [None]
+        def _run():
+            try:
+                result[0], _ = upsampler.enhance(img_bgr, outscale=scale)
+            except Exception as e:
+                exc_holder[0] = e
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        try:
+            while thread.is_alive():
+                n = tile_counter[0]
+                yield gr.update(), gr.update(), f"Step 2/3 — Tile {n}/{total_tiles}..."
+                time.sleep(0.3)
+            yield gr.update(), gr.update(), f"Step 2/3 — Tile {total_tiles}/{total_tiles}..."
+        finally:
+            hook.remove()
+        thread.join()
+
+        if exc_holder[0] is not None:
+            raise gr.Error(f"Upscaling failed: {exc_holder[0]}")
+        output_bgr = result[0]
+
+    else:
+        yield gr.update(), gr.update(), f"Step 2/3 — Upscaling {w}x{h} at {scale}x (may take a minute on CPU)..."
+        try:
+            output_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
+        except Exception as exc:
+            raise gr.Error(f"Upscaling failed: {exc}")
 
     oh, ow = output_bgr.shape[:2]
-
-    yield None, None, "Step 3/3 — Saving..."
+    yield gr.update(), gr.update(), "Step 3/3 — Saving..."
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
     cv2.imwrite(tmp.name, output_bgr)
 
