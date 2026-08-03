@@ -14,10 +14,25 @@ import gradio as gr
 import numpy as np
 import torch
 
-_physical_cores = os.cpu_count() or 4
-_torch_threads = max(1, _physical_cores // 2)
-torch.set_num_threads(_torch_threads)
-print(f"Using {_torch_threads}/{_physical_cores} CPU threads for inference.")
+# ── Hardware setup ────────────────────────────────────────────────────────────
+
+if torch.cuda.is_available():
+    _DEVICE = "cuda"
+    _USE_HALF = True                              # fp16 on RTX 4060 Tensor Cores
+    torch.backends.cudnn.benchmark = True         # auto-tune convolution kernels
+    torch.backends.cuda.matmul.allow_tf32 = True  # TF32 matmul on Ada Lovelace
+    torch.backends.cudnn.allow_tf32 = True
+    _gpu_name = torch.cuda.get_device_name(0)
+    _vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+    _DEVICE_LABEL = f"GPU  {_gpu_name}  ({_vram_gb:.0f} GB VRAM)  fp16"
+    print(f"Device : {_DEVICE_LABEL}")
+else:
+    _DEVICE = "cpu"
+    _USE_HALF = False
+    # Use all cores on CPU — the i7-14650HX has 16 cores
+    torch.set_num_threads(os.cpu_count() or 8)
+    _DEVICE_LABEL = f"CPU  ({os.cpu_count()} threads)  fp32"
+    print(f"Device : {_DEVICE_LABEL}  — install PyTorch CUDA for GPU acceleration")
 
 MODEL_CACHE: dict = {}
 MODEL_DIR = Path("models")
@@ -35,10 +50,10 @@ MODEL_URLS = {
 }
 
 
-# ── Tile-counting model wrapper ───────────────────────────────────────────────
+# ── Tile-counting wrapper ─────────────────────────────────────────────────────
 
 class _CountingWrapper(torch.nn.Module):
-    """Replaces upsampler.model temporarily to count per-tile forward passes."""
+    """Wraps upsampler.model to count per-tile forward passes."""
     def __init__(self, model: torch.nn.Module, counter: list):
         super().__init__()
         self._inner = model
@@ -71,14 +86,23 @@ def _get_upsampler(scale: int):
     if scale not in MODEL_CACHE:
         from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
+
         model_name, url = MODEL_URLS[scale]
         model_path = _download_model(model_name, url)
         model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
                         num_block=23, num_grow_ch=32, scale=scale)
-        MODEL_CACHE[scale] = RealESRGANer(
-            scale=scale, model_path=str(model_path), model=model,
-            tile=0, tile_pad=10, pre_pad=0, half=False,
+        upsampler = RealESRGANer(
+            scale=scale,
+            model_path=str(model_path),
+            model=model,
+            tile=0,
+            tile_pad=10,
+            pre_pad=0,
+            half=_USE_HALF,     # fp16 when CUDA available
         )
+        MODEL_CACHE[scale] = upsampler
+        print(f"Model loaded on {_DEVICE.upper()}"
+              + (" (fp16)" if _USE_HALF else " (fp32)"))
     return MODEL_CACHE[scale]
 
 
@@ -108,8 +132,6 @@ def upscale_single(image, scale_choice: str, tile_choice: str):
     if tile > 0:
         total_tiles = math.ceil(w / tile) * math.ceil(h / tile)
         tile_counter = [0]
-
-        # Swap in counting wrapper so every tile forward increments counter.
         original_model = upsampler.model
         upsampler.model = _CountingWrapper(original_model, tile_counter)
 
@@ -122,7 +144,7 @@ def upscale_single(image, scale_choice: str, tile_choice: str):
             except Exception as e:
                 exc_holder[0] = e
             finally:
-                upsampler.model = original_model  # always restore
+                upsampler.model = original_model
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
@@ -131,18 +153,17 @@ def upscale_single(image, scale_choice: str, tile_choice: str):
                 n = tile_counter[0]
                 yield gr.update(), gr.update(), f"Upscaling  {_bar(n, total_tiles)}"
                 time.sleep(0.25)
-            # Final tick
             yield gr.update(), gr.update(), f"Upscaling  {_bar(total_tiles, total_tiles)}"
         finally:
-            upsampler.model = original_model  # safety restore if generator is cancelled
-
+            upsampler.model = original_model
         thread.join()
+
         if exc_holder[0] is not None:
             raise gr.Error(f"Upscaling failed: {exc_holder[0]}")
         output_bgr = result[0]
 
     else:
-        yield gr.update(), gr.update(), f"Upscaling {w}x{h} at {scale}x — please wait..."
+        yield gr.update(), gr.update(), f"Upscaling {w}x{h} at {scale}x..."
         try:
             output_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
         except Exception as exc:
@@ -190,7 +211,7 @@ def upscale_batch(input_folder: str, output_folder: str,
     except Exception as exc:
         yield emit(f"Error loading model: {exc}"); return
     upsampler.tile_size = tile
-    yield emit(f"Model ready — processing {len(images)} image(s)...\n")
+    yield emit(f"Model ready on {_DEVICE.upper()} — processing {len(images)} image(s)...\n")
 
     ok = 0
     for i, img_path in enumerate(images):
@@ -216,7 +237,6 @@ def upscale_batch(input_folder: str, output_folder: str,
 CSS = """
 footer { display: none !important; }
 
-/* ── App shell ── */
 .app-header {
     text-align: center;
     padding: 2rem 1rem 1rem;
@@ -232,25 +252,28 @@ footer { display: none !important; }
     opacity: 0.6;
     margin: 0;
 }
-
-/* ── Image panels ── */
+.device-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-family: ui-monospace, Consolas, monospace;
+    background: rgba(99,102,241,0.15);
+    color: #818cf8;
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 999px;
+    padding: 0.2rem 0.75rem;
+    margin-top: 0.5rem;
+}
 .img-panel { border-radius: 12px !important; overflow: hidden; }
-
-/* ── Settings card ── */
 .settings-card {
     border-radius: 12px;
     padding: 1rem 1.25rem !important;
 }
-
-/* ── Status ── */
 .status-row textarea {
     font-family: ui-monospace, 'Cascadia Code', Consolas, monospace !important;
     font-size: 0.82rem !important;
     border-radius: 8px !important;
     resize: none;
 }
-
-/* ── Upscale button ── */
 .upscale-btn button {
     font-size: 1.05rem !important;
     font-weight: 700 !important;
@@ -258,8 +281,6 @@ footer { display: none !important; }
     height: 3rem !important;
     border-radius: 10px !important;
 }
-
-/* ── Batch log ── */
 .batch-log textarea {
     font-family: ui-monospace, 'Cascadia Code', Consolas, monospace !important;
     font-size: 0.78rem !important;
@@ -267,13 +288,19 @@ footer { display: none !important; }
 }
 """
 
+_device_color = "rgba(34,197,94,0.15)" if _DEVICE == "cuda" else "rgba(234,179,8,0.15)"
+_device_border = "rgba(34,197,94,0.4)" if _DEVICE == "cuda" else "rgba(234,179,8,0.4)"
+_device_text = "#4ade80" if _DEVICE == "cuda" else "#fbbf24"
+
 with gr.Blocks(title="4K Image Upscaler") as app:
 
-    gr.HTML("""
+    gr.HTML(f"""
     <div class="app-header">
         <h1>4K Image Upscaler</h1>
-        <p>AI-powered enhancement using Real-ESRGAN &nbsp;&middot;&nbsp;
-           Model weights downloaded automatically on first use</p>
+        <p>AI-powered enhancement using Real-ESRGAN</p>
+        <span class="device-badge" style="background:{_device_color};color:{_device_text};border-color:{_device_border}">
+            {_DEVICE_LABEL}
+        </span>
     </div>
     """)
 
@@ -310,7 +337,8 @@ with gr.Blocks(title="4K Image Upscaler") as app:
                         choices=["None", "512", "256"],
                         value="None",
                         label="Tile size",
-                        info="Lower = less memory used",
+                        info="None is fine — 8 GB VRAM handles full images" if _DEVICE == "cuda"
+                             else "Use 512/256 if you run out of memory",
                         scale=1,
                     )
                     status_box = gr.Textbox(
