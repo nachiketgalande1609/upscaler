@@ -45,7 +45,7 @@ SUPPORTED = {".jpg", ".jpeg", ".png", ".webp"}
 MODELS = {
     "Real-HAT 4x  (best quality)": (
         "Real_HAT_GAN_SRx4",
-        "https://huggingface.co/Acly/hat/resolve/main/Real_HAT_GAN_SRx4.pth",
+        "https://huggingface.co/hfmaster/models-moved/resolve/main/upscalers/Real_HAT_GAN_SRx4.pth",
         None, 4, True,
     ),
     "Real-ESRGAN 4x  (fast)": (
@@ -78,16 +78,36 @@ class _CountingWrapper(torch.nn.Module):
 
 
 def _download_model(model_name, url):
-    import urllib.request
     path = MODEL_DIR / f"{model_name}.pth"
     if path.exists():
         return path
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    def _hook(n, bs, total):
-        if total > 0:
-            print(f"\rDownloading {model_name}: {min(int(n*bs*100/total),100)}%", end="", flush=True)
-    urllib.request.urlretrieve(url, path, _hook)
-    print()
+    print(f"Downloading {model_name}...")
+
+    if "huggingface.co" in url:
+        # HuggingFace CDN requires requests for proper redirect + streaming
+        import requests
+        headers = {"User-Agent": "Mozilla/5.0"}
+        with requests.get(url, stream=True, headers=headers, allow_redirects=True) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0))
+            downloaded = 0
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 20):  # 1 MB chunks
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        pct = min(int(downloaded * 100 / total), 100)
+                        print(f"\r  {pct}%  ({downloaded >> 20} / {total >> 20} MB)", end="", flush=True)
+        print()
+    else:
+        import urllib.request
+        def _hook(n, bs, total):
+            if total > 0:
+                print(f"\r  {min(int(n*bs*100/total),100)}%", end="", flush=True)
+        urllib.request.urlretrieve(url, path, _hook)
+        print()
+
     return path
 
 
@@ -383,7 +403,7 @@ button.primary:hover, button[variant="primary"]:hover {
 
 # ── Build UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
+with gr.Blocks(title="4K Upscaler") as app:
 
     # ── Top bar ───────────────────────────────────────────────────────────────
     gr.HTML(f"""
@@ -425,7 +445,7 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
 
                     model_drop = gr.Dropdown(
                         choices=list(MODELS.keys()),
-                        value="Standard 4x  (best quality)",
+                        value="Real-HAT 4x  (best quality)",
                         label="Model",
                         info="Fast 4x is ~4× quicker with nearly identical quality.",
                     )
@@ -477,7 +497,7 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
                     gr.HTML('<div style="height:4px"></div>')
                     batch_model = gr.Dropdown(
                         choices=list(MODELS.keys()),
-                        value="Standard 4x  (best quality)",
+                        value="Real-HAT 4x  (best quality)",
                         label="Model",
                     )
                     batch_tile  = gr.Dropdown(["None","512","256"], value="None", label="Tile size")
@@ -499,4 +519,4 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
 
 
 if __name__ == "__main__":
-    app.launch(inbrowser=True, css=CSS)
+    app.launch(inbrowser=True, theme=gr.themes.Base(), css=CSS)
