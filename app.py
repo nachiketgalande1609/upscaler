@@ -130,9 +130,7 @@ class _HATUpsampler:
         img_f = img_bgr.astype(np.float32) / max_val
         img_rgb = img_f[:, :, ::-1].copy()
         t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0)
-        if _USE_HALF:
-            t = t.half()
-        t = t.to(_DEVICE)
+        t = t.to(_DEVICE)  # HAT runs fp32 — no half() conversion
 
         ws = self._window_size  # 16 — cached at init, survives _CountingWrapper swap
 
@@ -210,9 +208,8 @@ def _get_upsampler(model_key: str):
             key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
             hat.load_state_dict(loadnet[key] if key else loadnet, strict=True)
             hat.eval()
-            if _USE_HALF:
-                hat = hat.half()
             hat = hat.to(_DEVICE)
+            # HAT uses float32 internally for attention masks — fp16 causes type mismatch
             MODEL_CACHE[model_key] = _HATUpsampler(hat, scale)
         else:
             from basicsr.archs.rrdbnet_arch import RRDBNet
