@@ -177,6 +177,9 @@ class _HATUpsampler:
 
                 tile_out = self.model(tile_in)
                 tile_out = tile_out[:, :, :th * scale, :tw * scale]
+                del tile_in
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()  # prevent pool accumulation over tiles
 
                 # Destination (strip padding contribution)
                 ox0 = (x0 if xi == 0 else x0 + pad) * scale
@@ -272,7 +275,10 @@ def upscale_single(image, model_key, tile_choice):
     _, _, _, scale, is_hat = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
     if is_hat and tile == 0:
-        tile = 512  # HAT fp32 needs tiling; full-image fp32 OOMs on 8 GB
+        tile = 256  # HAT fp32 attention per 256-tile ≈ 400 MB; 512 grows pool >8 GB
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()  # release pool from any prior OOM crash
 
     yield gr.update(), gr.update(), _prog(5, "Loading model…"), ""
     upsampler = _get_upsampler(model_key)
