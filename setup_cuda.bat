@@ -27,7 +27,7 @@ echo [4/5] Installing Real-ESRGAN and dependencies...
 pip install realesrgan facexlib gfpgan
 
 echo [5/5] Installing remaining packages...
-pip install opencv-python Pillow tqdm gradio
+pip install opencv-python Pillow tqdm gradio einops
 
 echo.
 echo ============================================

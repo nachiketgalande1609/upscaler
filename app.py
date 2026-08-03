@@ -41,22 +41,27 @@ MODEL_CACHE: dict = {}
 MODEL_DIR = Path("models")
 SUPPORTED = {".jpg", ".jpeg", ".png", ".webp"}
 
-# model_key -> (filename, url, num_blocks, scale)
+# model_key -> (filename, url, num_blocks_or_None, scale, is_hat)
 MODELS = {
-    "Standard 4x  (best quality)": (
+    "Real-HAT 4x  (best quality)": (
+        "Real_HAT_GAN_SRx4",
+        "https://huggingface.co/Acly/hat/resolve/main/Real_HAT_GAN_SRx4.pth",
+        None, 4, True,
+    ),
+    "Real-ESRGAN 4x  (fast)": (
         "RealESRGAN_x4plus",
         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-        23, 4,
+        23, 4, False,
     ),
-    "Fast 4x  (~4× faster, 6-block)": (
+    "Real-ESRGAN 4x Lite  (fastest)": (
         "RealESRGAN_x4plus_anime_6B",
         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
-        6, 4,
+        6, 4, False,
     ),
-    "Standard 2x": (
+    "Real-ESRGAN 2x": (
         "RealESRGAN_x2plus",
         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
-        23, 2,
+        23, 2, False,
     ),
 }
 
@@ -86,14 +91,46 @@ def _download_model(model_name, url):
     return path
 
 
+class _HATAdapter(torch.nn.Module):
+    """Wraps HAT to pad input to window_size multiples, as RealESRGANer tiles may not be."""
+    def __init__(self, hat_model):
+        super().__init__()
+        self.hat = hat_model
+        self.window_size = hat_model.window_size
+        self.scale = hat_model.upscale
+
+    def forward(self, x):
+        h, w = x.shape[2], x.shape[3]
+        ws = self.window_size
+        ph = (ws - h % ws) % ws
+        pw = (ws - w % ws) % ws
+        if ph or pw:
+            x = torch.nn.functional.pad(x, (0, pw, 0, ph), mode='reflect')
+        out = self.hat(x)
+        return out[:, :, :h * self.scale, :w * self.scale]
+
+
 def _get_upsampler(model_key: str):
     if model_key not in MODEL_CACHE:
-        from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
-        name, url, num_blocks, scale = MODELS[model_key]
+        name, url, num_blocks, scale, is_hat = MODELS[model_key]
         path = _download_model(name, url)
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
-                        num_block=num_blocks, num_grow_ch=32, scale=scale)
+
+        if is_hat:
+            from hat_arch import HAT
+            hat = HAT(
+                upscale=4, in_chans=3, img_size=64, window_size=16,
+                compress_ratio=3, squeeze_factor=30, conv_scale=0.01, overlap_ratio=0.5,
+                img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180,
+                num_heads=[6, 6, 6, 6, 6, 6], mlp_ratio=2,
+                upsampler='pixelshuffle', resi_connection='1conv',
+            )
+            model = _HATAdapter(hat)
+        else:
+            from basicsr.archs.rrdbnet_arch import RRDBNet
+            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                            num_block=num_blocks, num_grow_ch=32, scale=scale)
+
         MODEL_CACHE[model_key] = RealESRGANer(
             scale=scale, model_path=str(path), model=model,
             tile=0, tile_pad=10, pre_pad=0, half=_USE_HALF)
@@ -149,7 +186,7 @@ def upscale_single(image, model_key, tile_choice):
         yield gr.update(), gr.update(), _idle(), ""
         return
 
-    _, _, _, scale = MODELS[model_key]
+    _, _, _, scale, _ = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
     yield gr.update(), gr.update(), _prog(5, "Loading model…"), ""
@@ -223,7 +260,7 @@ def upscale_batch(in_folder, out_folder, model_key, tile_choice):
     if not imgs: yield f"No supported images in {src}"; return
 
     dst.mkdir(parents=True, exist_ok=True)
-    _, _, _, scale = MODELS[model_key]
+    _, _, _, scale, _ = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
     yield emit("Loading model…")
