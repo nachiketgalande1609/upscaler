@@ -100,7 +100,7 @@ def upscale_single(image, scale_choice: str, tile_choice: str):
 
     yield gr.update(), gr.update(), "Loading model..."
     upsampler = _get_upsampler(scale)
-    upsampler.tile = tile
+    upsampler.tile_size = tile
 
     img_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     h, w = img_bgr.shape[:2]
@@ -189,7 +189,7 @@ def upscale_batch(input_folder: str, output_folder: str,
         upsampler = _get_upsampler(scale)
     except Exception as exc:
         yield emit(f"Error loading model: {exc}"); return
-    upsampler.tile = tile
+    upsampler.tile_size = tile
     yield emit(f"Model ready — processing {len(images)} image(s)...\n")
 
     ok = 0
