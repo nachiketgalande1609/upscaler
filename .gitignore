@@ -1,0 +1,23 @@
+# Virtual environment
+venv/
+
+# Downloaded model weights (large binary files, auto-downloaded on first run)
+models/
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Output folders (user-generated)
+output/
+upscaled/
+out/
+
+# Claude Code dev config (contains machine-specific absolute paths)
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
