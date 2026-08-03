@@ -24,50 +24,42 @@ if torch.cuda.is_available():
     torch.backends.cudnn.allow_tf32 = True
     _gpu_name = torch.cuda.get_device_name(0)
     _vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
-    _DEVICE_LABEL = f"{_gpu_name}  ·  {_vram_gb:.0f} GB VRAM  ·  fp16"
+    _DEVICE_LABEL = f"{_gpu_name} · {_vram_gb:.0f} GB VRAM · fp16"
     _DEVICE_SHORT = f"GPU · {_gpu_name}"
+    _DOT = "#4ade80"; _DOT_BG = "rgba(74,222,128,0.12)"; _DOT_BD = "rgba(74,222,128,0.3)"
     print(f"Device: {_DEVICE_LABEL}")
 else:
     _DEVICE = "cpu"
     _USE_HALF = False
     torch.set_num_threads(os.cpu_count() or 8)
-    _DEVICE_LABEL = f"CPU  ·  {os.cpu_count()} threads  ·  fp32"
+    _DEVICE_LABEL = f"CPU · {os.cpu_count()} threads · fp32"
     _DEVICE_SHORT = f"CPU · {os.cpu_count()} threads"
+    _DOT = "#fbbf24"; _DOT_BG = "rgba(251,191,36,0.12)"; _DOT_BD = "rgba(251,191,36,0.3)"
     print(f"Device: {_DEVICE_LABEL}")
 
 MODEL_CACHE: dict = {}
 MODEL_DIR = Path("models")
 SUPPORTED = {".jpg", ".jpeg", ".png", ".webp"}
-
 MODEL_URLS = {
-    4: (
-        "RealESRGAN_x4plus",
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-    ),
-    2: (
-        "RealESRGAN_x2plus",
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
-    ),
+    4: ("RealESRGAN_x4plus",
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"),
+    2: ("RealESRGAN_x2plus",
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"),
 }
 
 
-# ── Tile-counting wrapper ─────────────────────────────────────────────────────
-
 class _CountingWrapper(torch.nn.Module):
-    def __init__(self, model: torch.nn.Module, counter: list):
+    def __init__(self, model, counter):
         super().__init__()
         self._inner = model
         self._counter = counter
-
-    def forward(self, *args, **kwargs):
-        out = self._inner(*args, **kwargs)
+    def forward(self, *a, **kw):
+        out = self._inner(*a, **kw)
         self._counter[0] += 1
         return out
 
 
-# ── Model helpers ─────────────────────────────────────────────────────────────
-
-def _download_model(model_name: str, url: str) -> Path:
+def _download_model(model_name, url):
     import urllib.request
     path = MODEL_DIR / f"{model_name}.pth"
     if path.exists():
@@ -75,79 +67,78 @@ def _download_model(model_name: str, url: str) -> Path:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     def _hook(n, bs, total):
         if total > 0:
-            print(f"\rDownloading {model_name}: {min(int(n*bs*100/total),100)}%",
-                  end="", flush=True)
+            print(f"\rDownloading {model_name}: {min(int(n*bs*100/total),100)}%", end="", flush=True)
     urllib.request.urlretrieve(url, path, _hook)
     print()
     return path
 
 
-def _get_upsampler(scale: int):
+def _get_upsampler(scale):
     if scale not in MODEL_CACHE:
         from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
-
-        model_name, url = MODEL_URLS[scale]
-        model_path = _download_model(model_name, url)
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
-                        num_block=23, num_grow_ch=32, scale=scale)
-        upsampler = RealESRGANer(
-            scale=scale,
-            model_path=str(model_path),
-            model=model,
-            tile=0,
-            tile_pad=10,
-            pre_pad=0,
-            half=_USE_HALF,
-        )
-        MODEL_CACHE[scale] = upsampler
-        print(f"Model loaded on {_DEVICE.upper()}" + (" (fp16)" if _USE_HALF else " (fp32)"))
+        name, url = MODEL_URLS[scale]
+        path = _download_model(name, url)
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
+        MODEL_CACHE[scale] = RealESRGANer(
+            scale=scale, model_path=str(path), model=model,
+            tile=0, tile_pad=10, pre_pad=0, half=_USE_HALF)
     return MODEL_CACHE[scale]
 
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
 
-def _progress_html(pct: int, label: str, done: bool = False) -> str:
-    clamped = max(0, min(100, pct))
-    fill_class = "prog-fill-done" if done else "prog-fill"
+def _prog(pct, label, done=False):
+    p = max(0, min(100, pct))
+    bar_style = (
+        'background:#4ade80;transition:width .35s ease'
+        if done else
+        'background:linear-gradient(90deg,#7c6ef5,#a78bfa,#c4b5fd);background-size:300% 100%;'
+        'animation:shimmer 2s linear infinite;transition:width .35s ease'
+    )
+    num_color = "#4ade80" if done else "#a78bfa"
     return f"""
-<div class="prog-card">
-  <div class="prog-top">
-    <span class="prog-label">{label}</span>
-    <span class="prog-num {'prog-done' if done else ''}">{clamped}%</span>
+<div style="background:#16161c;border:1px solid #252530;border-radius:10px;padding:12px 14px;margin-top:4px">
+  <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:13px;font-family:ui-monospace,Consolas,monospace">
+    <span style="color:#dde1f0">{label}</span>
+    <span style="color:{num_color};font-weight:700">{p}%</span>
   </div>
-  <div class="prog-track">
-    <div class="{fill_class}" style="width:{clamped}%"></div>
+  <div style="height:6px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden">
+    <div style="height:100%;width:{p}%;border-radius:99px;{bar_style}"></div>
   </div>
 </div>"""
 
 
-def _idle_html() -> str:
-    return '<div class="prog-card prog-idle">Ready — upload an image and press Upscale</div>'
+def _idle():
+    return '<div style="background:#16161c;border:1px solid #252530;border-radius:10px;padding:12px 14px;margin-top:4px;font-size:12px;color:#6b6b80;text-align:center">Ready — upload an image and click Upscale</div>'
 
 
-def _info_html(w: int, h: int, ow: int, oh: int, scale: int) -> str:
+def _info(w, h, ow, oh, scale):
     return f"""
-<div class="result-info">
-  <div class="ri-item"><span class="ri-k">Input</span><span class="ri-v">{w} × {h}</span></div>
-  <div class="ri-sep">→</div>
-  <div class="ri-item"><span class="ri-k">Output</span><span class="ri-v">{ow} × {oh}</span></div>
-  <div class="ri-badge">{scale}×</div>
+<div style="display:flex;align-items:center;gap:12px;background:#16161c;border:1px solid #252530;
+            border-radius:10px;padding:10px 14px;margin-top:6px;font-size:12px">
+  <div><div style="color:#6b6b80;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Input</div>
+       <div style="font-family:ui-monospace,Consolas,monospace;color:#dde1f0">{w} × {h}</div></div>
+  <div style="color:#6b6b80;font-size:16px">→</div>
+  <div><div style="color:#6b6b80;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Output</div>
+       <div style="font-family:ui-monospace,Consolas,monospace;color:#dde1f0">{ow} × {oh}</div></div>
+  <div style="margin-left:auto;background:rgba(124,110,245,.15);border:1px solid rgba(124,110,245,.3);
+              color:#a78bfa;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px">{scale}×</div>
 </div>"""
 
 
 # ── Processing ────────────────────────────────────────────────────────────────
 
-def upscale_single(image, scale_choice: str, tile_choice: str):
+def upscale_single(image, scale_choice, tile_choice):
     if image is None:
         gr.Warning("Upload an image first.")
-        yield gr.update(), gr.update(), _idle_html(), ""
+        yield gr.update(), gr.update(), _idle(), ""
         return
 
     scale = int(scale_choice[0])
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
-    yield gr.update(), gr.update(), _progress_html(5, "Loading model…"), ""
+    yield gr.update(), gr.update(), _prog(5, "Loading model…"), ""
     upsampler = _get_upsampler(scale)
     upsampler.tile_size = tile
 
@@ -155,541 +146,265 @@ def upscale_single(image, scale_choice: str, tile_choice: str):
     h, w = img_bgr.shape[:2]
 
     if tile > 0:
-        total_tiles = math.ceil(w / tile) * math.ceil(h / tile)
-        tile_counter = [0]
-        original_model = upsampler.model
-        upsampler.model = _CountingWrapper(original_model, tile_counter)
-
-        result: list = [None]
-        exc_holder: list = [None]
+        total = math.ceil(w / tile) * math.ceil(h / tile)
+        counter = [0]
+        orig = upsampler.model
+        upsampler.model = _CountingWrapper(orig, counter)
+        result, exc_h = [None], [None]
 
         def _run():
             try:
                 result[0], _ = upsampler.enhance(img_bgr, outscale=scale)
             except Exception as e:
-                exc_holder[0] = e
+                exc_h[0] = e
             finally:
-                upsampler.model = original_model
+                upsampler.model = orig
 
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
         try:
-            while thread.is_alive():
-                n = tile_counter[0]
-                pct = 10 + int(85 * n / total_tiles) if total_tiles else 50
-                yield (gr.update(), gr.update(),
-                       _progress_html(pct, f"Upscaling… {n} / {total_tiles} tiles"), "")
+            while t.is_alive():
+                n = counter[0]
+                pct = 10 + int(85 * n / total) if total else 50
+                yield gr.update(), gr.update(), _prog(pct, f"Upscaling… {n}/{total} tiles"), ""
                 time.sleep(0.25)
-            yield gr.update(), gr.update(), _progress_html(95, "Finalising…"), ""
+            yield gr.update(), gr.update(), _prog(95, "Finalising…"), ""
         finally:
-            upsampler.model = original_model
-        thread.join()
-
-        if exc_holder[0] is not None:
-            raise gr.Error(f"Upscaling failed: {exc_holder[0]}")
-        output_bgr = result[0]
+            upsampler.model = orig
+        t.join()
+        if exc_h[0]:
+            raise gr.Error(f"Failed: {exc_h[0]}")
+        out_bgr = result[0]
     else:
-        yield (gr.update(), gr.update(),
-               _progress_html(20, f"Upscaling {w}×{h} at {scale}×…"), "")
+        yield gr.update(), gr.update(), _prog(20, f"Upscaling {w}×{h} → {scale}×…"), ""
         try:
-            output_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
-        except Exception as exc:
-            raise gr.Error(f"Upscaling failed: {exc}")
+            out_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
+        except Exception as e:
+            raise gr.Error(f"Failed: {e}")
 
-    oh, ow = output_bgr.shape[:2]
-    yield gr.update(), gr.update(), _progress_html(98, "Saving…"), ""
-
+    oh, ow = out_bgr.shape[:2]
+    yield gr.update(), gr.update(), _prog(98, "Saving…"), ""
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    cv2.imwrite(tmp.name, output_bgr)
+    cv2.imwrite(tmp.name, out_bgr)
 
     yield (
-        cv2.cvtColor(output_bgr, cv2.COLOR_BGR2RGB),
+        cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB),
         tmp.name,
-        _progress_html(100, "Complete!", done=True),
-        _info_html(w, h, ow, oh, scale),
+        _prog(100, "Done!", done=True),
+        _info(w, h, ow, oh, scale),
     )
 
 
-def upscale_batch(input_folder: str, output_folder: str,
-                  scale_choice: str, tile_choice: str):
-    lines: list[str] = []
-    def emit(msg: str) -> str:
-        lines.append(msg)
-        return "\n".join(lines)
+def upscale_batch(in_folder, out_folder, scale_choice, tile_choice):
+    lines = []
+    def emit(m):
+        lines.append(m); return "\n".join(lines)
 
-    if not input_folder.strip():
-        yield "Error: Input folder path is required."; return
-    if not output_folder.strip():
-        yield "Error: Output folder path is required."; return
+    if not in_folder.strip(): yield "Error: input folder required"; return
+    if not out_folder.strip(): yield "Error: output folder required"; return
+    src = Path(in_folder.strip()); dst = Path(out_folder.strip())
+    if not src.is_dir(): yield f"Error: not found: {src}"; return
 
-    src = Path(input_folder.strip())
-    dst = Path(output_folder.strip())
-    if not src.is_dir():
-        yield f"Error: Folder not found: {src}"; return
-
-    images = sorted(p for p in src.iterdir()
-                    if p.is_file() and p.suffix.lower() in SUPPORTED)
-    if not images:
-        yield f"No supported images found in: {src}"; return
+    imgs = sorted(p for p in src.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED)
+    if not imgs: yield f"No supported images in {src}"; return
 
     dst.mkdir(parents=True, exist_ok=True)
     scale = int(scale_choice[0])
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
     yield emit("Loading model…")
-    try:
-        upsampler = _get_upsampler(scale)
-    except Exception as exc:
-        yield emit(f"Error loading model: {exc}"); return
-    upsampler.tile_size = tile
-    yield emit(f"Ready on {_DEVICE.upper()} — {len(images)} image(s) queued\n")
+    try: up = _get_upsampler(scale)
+    except Exception as e: yield emit(f"Error: {e}"); return
+    up.tile_size = tile
+    yield emit(f"Ready on {_DEVICE.upper()} — {len(imgs)} image(s)\n")
 
     ok = 0
-    for i, img_path in enumerate(images):
-        yield emit(f"[{i+1}/{len(images)}]  {img_path.name}")
+    for i, p in enumerate(imgs):
+        yield emit(f"[{i+1}/{len(imgs)}]  {p.name}")
         try:
-            img_bgr = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
-            if img_bgr is None:
-                raise ValueError("Could not decode image")
-            out_bgr, _ = upsampler.enhance(img_bgr, outscale=scale)
-            ext = ".png" if img_path.suffix.lower() == ".webp" else img_path.suffix.lower()
-            out_path = dst / (img_path.stem + ext)
-            cv2.imwrite(str(out_path), out_bgr)
-            yield emit(f"    ✓  saved → {out_path.name}")
-            ok += 1
-        except Exception as exc:
-            yield emit(f"    ✗  {exc}")
+            bgr = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            if bgr is None: raise ValueError("Could not read file")
+            out, _ = up.enhance(bgr, outscale=scale)
+            ext = ".png" if p.suffix.lower() == ".webp" else p.suffix.lower()
+            op = dst / (p.stem + ext)
+            cv2.imwrite(str(op), out)
+            yield emit(f"    ✓  {op.name}"); ok += 1
+        except Exception as e:
+            yield emit(f"    ✗  {e}")
 
-    status = "✓ All done" if ok == len(images) else f"⚠ {ok}/{len(images)} succeeded"
-    yield emit(f"\n{status} — {ok} image(s) upscaled successfully.")
+    yield emit(f"\n{'✓' if ok==len(imgs) else '⚠'} {ok}/{len(imgs)} done.")
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
-_is_gpu = _DEVICE == "cuda"
-_dot_color  = "#4ade80" if _is_gpu else "#fbbf24"
-_dot_bg     = "rgba(74,222,128,0.12)" if _is_gpu else "rgba(251,191,36,0.12)"
-_dot_border = "rgba(74,222,128,0.3)"  if _is_gpu else "rgba(251,191,36,0.3)"
-
 CSS = """
-/* ─── Tokens ───────────────────────────────────────────────── */
-:root {
-    --bg:         #09090c;
-    --panel:      #111115;
-    --card:       #16161c;
-    --border:     #252530;
-    --border-hi:  #3a3a50;
-    --accent:     #7c6ef5;
-    --accent-hi:  #a78bfa;
-    --accent-glow:rgba(124,110,245,0.25);
-    --text:       #dde1f0;
-    --sub:        #7878a0;
-    --success:    #4ade80;
-    --r:          14px;
-    --r-sm:       8px;
-}
+@keyframes shimmer { 0%{background-position:200% center} 100%{background-position:-200% center} }
+@keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+@keyframes slideUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-/* ─── Global reset ──────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; }
-body, .gradio-container, .main, .wrap, .app {
-    background: var(--bg) !important;
-    color: var(--text) !important;
-    font-family: 'Inter', system-ui, sans-serif !important;
-}
-footer { display: none !important; }
-.gradio-container { max-width: 1400px !important; margin: 0 auto !important; padding: 0 1.5rem 3rem !important; }
+/* Force dark base */
+body { background:#09090c !important; }
+.gradio-container { background:#09090c !important; max-width:100% !important; padding:0 !important; }
+.main { background:#09090c !important; }
+footer { display:none !important; }
 
-/* ─── Scrollbar ─────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 99px; }
+/* All panels */
+.gr-form, .gr-box, .wrap { background:#111115 !important; }
 
-/* ─── Panels & groups ───────────────────────────────────────── */
-.gr-box, .gr-form, .gr-group, .gr-panel {
-    background: var(--card) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: var(--r) !important;
-}
-
-/* ─── Tabs ──────────────────────────────────────────────────── */
-.tab-nav {
-    background: transparent !important;
-    border-bottom: 1px solid var(--border) !important;
-    padding: 0 !important;
-    margin-bottom: 1.5rem !important;
-}
+/* Tabs */
+.tab-nav { background:#09090c !important; border-bottom:1px solid #252530 !important; padding:0 24px !important; }
 .tab-nav button {
-    background: transparent !important;
-    color: var(--sub) !important;
-    border: none !important;
-    border-bottom: 2px solid transparent !important;
-    border-radius: 0 !important;
-    font-size: 0.9rem !important;
-    font-weight: 600 !important;
-    padding: 0.7rem 1.4rem !important;
-    transition: color 0.2s, border-color 0.2s !important;
-    letter-spacing: 0.01em !important;
+    background:transparent !important; color:#555570 !important;
+    border:none !important; border-bottom:2px solid transparent !important;
+    border-radius:0 !important; font-size:13px !important; font-weight:600 !important;
+    padding:10px 18px !important; transition:color .2s,border-color .2s !important;
 }
-.tab-nav button.selected {
-    color: var(--accent-hi) !important;
-    border-bottom-color: var(--accent-hi) !important;
-}
-.tab-nav button:hover:not(.selected) { color: var(--text) !important; }
+.tab-nav button.selected { color:#a78bfa !important; border-bottom-color:#a78bfa !important; }
+.tab-nav button:hover:not(.selected) { color:#aaa !important; }
 
-/* ─── Inputs ────────────────────────────────────────────────── */
-input[type=text], textarea {
-    background: var(--panel) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: var(--r-sm) !important;
-    color: var(--text) !important;
-    font-size: 0.875rem !important;
-    transition: border-color 0.2s, box-shadow 0.2s !important;
+/* Input fields */
+.gr-textbox textarea, input[type=text] {
+    background:#1a1a22 !important; border:1px solid #2a2a38 !important;
+    color:#dde1f0 !important; border-radius:8px !important;
+    font-size:13px !important; transition:border-color .2s,box-shadow .2s !important;
 }
-input[type=text]:focus, textarea:focus {
-    border-color: var(--accent) !important;
-    box-shadow: 0 0 0 3px var(--accent-glow) !important;
-    outline: none !important;
-}
-label span, .gr-form label {
-    color: var(--sub) !important;
-    font-size: 0.78rem !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.04em !important;
-    text-transform: uppercase !important;
+.gr-textbox textarea:focus, input[type=text]:focus {
+    border-color:#7c6ef5 !important;
+    box-shadow:0 0 0 3px rgba(124,110,245,.2) !important;
 }
 
-/* ─── Radio & Dropdown ──────────────────────────────────────── */
-.gr-radio, .gr-dropdown { background: transparent !important; }
-.gr-radio label { text-transform: none !important; font-size: 0.85rem !important; font-weight: 400 !important; color: var(--text) !important; letter-spacing: 0 !important; }
-input[type=radio] { accent-color: var(--accent-hi) !important; }
-.gr-dropdown select, select {
-    background: var(--panel) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: var(--r-sm) !important;
-    color: var(--text) !important;
-}
+/* Labels */
+label > span, .gr-form label > span { color:#888 !important; font-size:11px !important; font-weight:600 !important; letter-spacing:.05em !important; text-transform:uppercase !important; }
 
-/* ─── Sidebar card ──────────────────────────────────────────── */
-.sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-.ctrl-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    padding: 1.25rem 1.25rem 1rem;
-}
-.ctrl-card-title {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--sub);
-    margin-bottom: 0.85rem;
-    padding-bottom: 0.6rem;
-    border-bottom: 1px solid var(--border);
-}
+/* Radio */
+.gr-radio { background:transparent !important; }
+.gr-radio label { color:#ccc !important; font-size:13px !important; font-weight:400 !important; text-transform:none !important; letter-spacing:0 !important; }
+input[type=radio] { accent-color:#a78bfa !important; }
 
-/* ─── Image panels ──────────────────────────────────────────── */
-.img-well {
-    position: relative;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    overflow: hidden;
-    transition: border-color 0.25s;
-    min-height: 420px;
-    display: flex;
-    flex-direction: column;
-}
-.img-well:hover { border-color: var(--border-hi); }
-.img-well-label {
-    position: absolute;
-    top: 10px; left: 12px;
-    z-index: 10;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--sub);
-    background: rgba(9,9,12,0.7);
-    padding: 0.2rem 0.6rem;
-    border-radius: 99px;
-    backdrop-filter: blur(6px);
-    border: 1px solid var(--border);
-}
+/* Dropdown */
+.gr-dropdown > label > div { background:#1a1a22 !important; border:1px solid #2a2a38 !important; color:#dde1f0 !important; border-radius:8px !important; }
 
-/* Gradio image component inside img-well */
-.img-well .gr-image, .img-well > div { height: 100% !important; }
-
-/* ─── Upscale button ────────────────────────────────────────── */
-.upscale-btn > button {
-    width: 100% !important;
-    background: linear-gradient(135deg, #6d5ef0, #9d7df5, #c4a8fc) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: var(--r-sm) !important;
-    font-size: 0.95rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.05em !important;
-    height: 2.8rem !important;
+/* Primary button — target every possible Gradio button selector */
+button.primary, button[variant="primary"], .gr-button-primary,
+#single-run-btn button, #batch-run-btn button {
+    background: linear-gradient(135deg,#5b4de0,#7c6ef5,#a78bfa) !important;
+    color: #fff !important; border: none !important;
+    border-radius: 9px !important; font-size: 14px !important;
+    font-weight: 700 !important; letter-spacing: .04em !important;
+    height: 44px !important; width: 100% !important;
     cursor: pointer !important;
-    box-shadow: 0 0 0 0 var(--accent-glow) !important;
-    transition: opacity 0.2s, transform 0.15s, box-shadow 0.25s !important;
-    position: relative;
-    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(124,110,245,.35) !important;
+    transition: opacity .2s, transform .15s, box-shadow .2s !important;
 }
-.upscale-btn > button::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.12) 100%);
-    pointer-events: none;
-}
-.upscale-btn > button:hover {
-    opacity: 0.92 !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 24px var(--accent-glow) !important;
-}
-.upscale-btn > button:active { transform: translateY(0) !important; }
-
-/* ─── Progress card ─────────────────────────────────────────── */
-.prog-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    padding: 0.9rem 1rem;
-}
-.prog-idle {
-    font-size: 0.8rem;
-    color: var(--sub);
-    text-align: center;
-}
-.prog-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.55rem;
-}
-.prog-label {
-    font-size: 0.82rem;
-    color: var(--text);
-    font-family: ui-monospace, Consolas, monospace;
-}
-.prog-num {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: var(--accent-hi);
-    font-family: ui-monospace, Consolas, monospace;
-    min-width: 3rem;
-    text-align: right;
-}
-.prog-done { color: var(--success) !important; }
-.prog-track {
-    height: 6px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 99px;
-    overflow: hidden;
-}
-.prog-fill {
-    height: 100%;
-    border-radius: 99px;
-    background: linear-gradient(90deg, var(--accent), var(--accent-hi), #c4b5fd);
-    background-size: 300% 100%;
-    transition: width 0.35s cubic-bezier(0.4,0,0.2,1);
-    animation: shimmer 2.5s linear infinite;
-}
-.prog-fill-done {
-    height: 100%;
-    border-radius: 99px;
-    background: var(--success);
-    transition: width 0.35s cubic-bezier(0.4,0,0.2,1);
-}
-@keyframes shimmer {
-    0%   { background-position: 200% center; }
-    100% { background-position: -200% center; }
+button.primary:hover, button[variant="primary"]:hover {
+    opacity:.88 !important; transform:translateY(-1px) !important;
+    box-shadow:0 6px 28px rgba(124,110,245,.5) !important;
 }
 
-/* ─── Result info bar ───────────────────────────────────────── */
-.result-info {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    padding: 0.65rem 1rem;
-    font-size: 0.82rem;
-    animation: fadeUp 0.4s ease both;
+/* Image panels */
+#input-panel, #output-panel {
+    background:#111115 !important;
+    border:1px solid #252530 !important;
+    border-radius:14px !important;
+    overflow:hidden !important;
+    transition:border-color .25s !important;
 }
-@keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-.ri-item { display: flex; flex-direction: column; gap: 0.1rem; }
-.ri-k { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sub); font-weight: 700; }
-.ri-v { font-family: ui-monospace, Consolas, monospace; color: var(--text); font-size: 0.84rem; }
-.ri-sep { color: var(--sub); font-size: 1rem; padding: 0 0.25rem; }
-.ri-badge {
-    margin-left: auto;
-    background: rgba(124,110,245,0.15);
-    border: 1px solid rgba(124,110,245,0.3);
-    color: var(--accent-hi);
-    font-size: 0.78rem;
-    font-weight: 700;
-    border-radius: 99px;
-    padding: 0.15rem 0.65rem;
+#input-panel:hover, #output-panel:hover { border-color:#3a3a52 !important; }
+
+/* Sidebar */
+#sidebar { background:#111115; border:1px solid #252530; border-radius:14px; padding:20px; }
+
+/* File widget */
+.gr-file { background:#1a1a22 !important; border:1px solid #2a2a38 !important; border-radius:8px !important; }
+.gr-file label > span { color:#888 !important; font-size:11px !important; }
+
+/* Batch log */
+#batch-log textarea {
+    font-family:ui-monospace,Consolas,monospace !important;
+    font-size:12px !important; line-height:1.7 !important;
+    background:#0f0f16 !important; border:1px solid #252530 !important;
+    color:#c8c8e0 !important; border-radius:10px !important;
 }
 
-/* ─── App header ────────────────────────────────────────────── */
-.app-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1.75rem 0 1.25rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1.5rem;
-    animation: fadeDown 0.45s ease both;
-}
-@keyframes fadeDown { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
-.app-logo { display: flex; align-items: center; gap: 0.75rem; }
-.app-logo-icon {
-    width: 38px; height: 38px;
-    background: linear-gradient(135deg, #6d5ef0, #a78bfa);
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.1rem;
-    box-shadow: 0 4px 16px rgba(124,110,245,0.35);
-}
-.app-logo-text h1 {
-    font-size: 1.2rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    margin: 0;
-    color: var(--text);
-}
-.app-logo-text p {
-    font-size: 0.72rem;
-    color: var(--sub);
-    margin: 0;
-}
-.device-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.73rem;
-    font-family: ui-monospace, Consolas, monospace;
-    border-radius: 99px;
-    padding: 0.35rem 0.9rem;
-    border: 1px solid;
-    animation: fadeIn 0.6s ease 0.2s both;
-}
-.device-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.4; }
-}
-@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-
-/* ─── Download file widget ──────────────────────────────────── */
-.gr-file { background: var(--card) !important; border-color: var(--border) !important; border-radius: var(--r-sm) !important; }
-
-/* ─── Batch log ─────────────────────────────────────────────── */
-.batch-log textarea {
-    font-family: ui-monospace, 'Cascadia Code', Consolas, monospace !important;
-    font-size: 0.78rem !important;
-    line-height: 1.65 !important;
-    background: var(--panel) !important;
-    border-color: var(--border) !important;
-    color: var(--text) !important;
-}
-
-/* ─── Markdown body ─────────────────────────────────────────── */
-.gr-markdown p { color: var(--sub) !important; font-size: 0.85rem !important; }
+/* Markdown */
+.gr-markdown, .gr-markdown p { color:#555570 !important; font-size:13px !important; }
 """
 
-# ── UI ────────────────────────────────────────────────────────────────────────
+# ── Build UI ──────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="4K Upscaler") as app:
+with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
 
-    # Header
+    # ── Top bar ───────────────────────────────────────────────────────────────
     gr.HTML(f"""
-    <div class="app-header">
-        <div class="app-logo">
-            <div class="app-logo-icon">✦</div>
-            <div class="app-logo-text">
-                <h1>4K Upscaler</h1>
-                <p>Real-ESRGAN · AI image enhancement</p>
-            </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:18px 28px 14px;border-bottom:1px solid #1e1e28;
+                background:#09090c;animation:fadeIn .5s ease both">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:38px;height:38px;background:linear-gradient(135deg,#5b4de0,#a78bfa);
+                    border-radius:10px;display:flex;align-items:center;justify-content:center;
+                    font-size:18px;box-shadow:0 4px 16px rgba(124,110,245,.4)">✦</div>
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#e8e8f4;letter-spacing:-.02em">4K Upscaler</div>
+          <div style="font-size:11px;color:#555570">Real-ESRGAN · AI image enhancement</div>
         </div>
-        <span class="device-pill"
-              style="background:{_dot_bg};color:{_dot_color};border-color:{_dot_border}">
-            <span class="device-dot" style="background:{_dot_color}"></span>
-            {_DEVICE_SHORT}
-        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;background:{_DOT_BG};
+                  border:1px solid {_DOT_BD};border-radius:99px;padding:5px 14px;
+                  font-size:11px;font-family:ui-monospace,Consolas,monospace;color:{_DOT};
+                  animation:fadeIn .6s ease .2s both">
+        <span style="width:6px;height:6px;background:{_DOT};border-radius:50%;
+                     animation:pulse 2s ease-in-out infinite"></span>
+        {_DEVICE_SHORT}
+      </div>
     </div>
+    <style>
+    @keyframes pulse {{ 0%,100%{{opacity:1}} 50%{{opacity:.35}} }}
+    </style>
     """)
 
     with gr.Tabs():
 
-        # ── Single Image ──────────────────────────────────────────────────────
-        with gr.Tab("Single Image"):
-
+        # ── Single Image tab ──────────────────────────────────────────────────
+        with gr.Tab("  Single Image  "):
             with gr.Row(equal_height=False):
 
-                # Left: controls sidebar
-                with gr.Column(scale=1, min_width=240):
-                    gr.HTML('<div class="ctrl-card-title" style="margin-top:0.25rem">Settings</div>')
+                # Sidebar
+                with gr.Column(scale=1, min_width=260, elem_id="sidebar"):
+                    gr.HTML('<div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#444;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #1e1e28">Settings</div>')
 
                     scale_radio = gr.Radio(
-                        choices=["2x", "4x"],
-                        value="4x",
-                        label="Scale factor",
+                        choices=["2x", "4x"], value="4x", label="Scale factor",
                     )
-
+                    gr.HTML('<div style="height:4px"></div>')
                     tile_drop = gr.Dropdown(
-                        choices=["None", "512", "256"],
-                        value="None",
-                        label="Tile size",
-                        info="None = full image (fast on GPU). Use 512 if VRAM overflows.",
+                        choices=["None", "512", "256"], value="None", label="Tile size",
+                        info="None = full image. Use 512/256 if VRAM overflows.",
                     )
+                    gr.HTML('<div style="height:12px"></div>')
 
-                    run_btn = gr.Button(
-                        "Upscale",
-                        variant="primary",
-                        size="lg",
-                        elem_classes="upscale-btn",
-                    )
+                    run_btn = gr.Button("Upscale", variant="primary", elem_id="single-run-btn")
 
-                    progress_html = gr.HTML(
-                        value='<div class="prog-card prog-idle">Ready — upload an image and press Upscale</div>',
-                    )
+                    gr.HTML('<div style="height:8px"></div>')
+                    progress_html = gr.HTML(value=_idle())
+                    result_info   = gr.HTML(value="")
 
-                    result_info = gr.HTML(value="")
-
+                    gr.HTML('<div style="height:8px"></div>')
                     download_file = gr.File(label="Download result")
 
-                # Right: before / after images
+                # Images — Before / After
                 with gr.Column(scale=3):
                     with gr.Row(equal_height=True):
-                        with gr.Column(elem_classes="img-well"):
-                            gr.HTML('<div class="img-well-label">Before</div>')
+                        with gr.Column(elem_id="input-panel"):
+                            gr.HTML('<div style="padding:10px 14px 4px;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#555570">Before</div>')
                             input_img = gr.Image(
-                                type="pil",
-                                show_label=False,
-                                height=500,
-                                container=False,
+                                type="pil", show_label=False,
+                                height=520, container=False,
                             )
-                        with gr.Column(elem_classes="img-well"):
-                            gr.HTML('<div class="img-well-label">After</div>')
+                        with gr.Column(elem_id="output-panel"):
+                            gr.HTML('<div style="padding:10px 14px 4px;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#555570">After</div>')
                             output_img = gr.Image(
-                                show_label=False,
-                                height=500,
-                                interactive=False,
-                                container=False,
+                                show_label=False, height=520,
+                                interactive=False, container=False,
                             )
 
             run_btn.click(
@@ -698,36 +413,25 @@ with gr.Blocks(title="4K Upscaler") as app:
                 outputs=[output_img, download_file, progress_html, result_info],
             )
 
-        # ── Batch ─────────────────────────────────────────────────────────────
-        with gr.Tab("Batch Processing"):
-
+        # ── Batch tab ─────────────────────────────────────────────────────────
+        with gr.Tab("  Batch Processing  "):
             with gr.Row():
-
-                with gr.Column(scale=1, min_width=300):
-                    gr.Markdown("Process all images in a folder. Enter full paths on this machine.")
-
-                    in_folder = gr.Textbox(
-                        label="Input folder",
-                        placeholder=r"C:\Users\you\photos",
-                    )
-                    out_folder = gr.Textbox(
-                        label="Output folder",
-                        placeholder=r"C:\Users\you\photos_4k",
-                    )
+                with gr.Column(scale=1, min_width=300, elem_id="sidebar"):
+                    gr.HTML('<div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#444;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #1e1e28">Batch Settings</div>')
+                    in_folder  = gr.Textbox(label="Input folder",  placeholder=r"C:\Users\you\photos")
+                    out_folder = gr.Textbox(label="Output folder", placeholder=r"C:\Users\you\photos_4k")
+                    gr.HTML('<div style="height:4px"></div>')
                     with gr.Row():
-                        batch_scale = gr.Radio(["2x", "4x"], value="4x", label="Scale")
-                        batch_tile  = gr.Dropdown(["None", "512", "256"], value="None", label="Tile size")
-
-                    batch_btn = gr.Button("Run Batch", variant="primary", size="lg",
-                                          elem_classes="upscale-btn")
+                        batch_scale = gr.Radio(["2x","4x"], value="4x", label="Scale")
+                        batch_tile  = gr.Dropdown(["None","512","256"], value="None", label="Tile size")
+                    gr.HTML('<div style="height:12px"></div>')
+                    batch_btn = gr.Button("Run Batch", variant="primary", elem_id="batch-run-btn")
+                    gr.Markdown("Processes every JPG, PNG, and WEBP in the input folder.")
 
                 with gr.Column(scale=2):
                     batch_log = gr.Textbox(
-                        label="Log",
-                        lines=24,
-                        interactive=False,
-                        autoscroll=True,
-                        elem_classes="batch-log",
+                        label="Progress log", lines=26,
+                        interactive=False, autoscroll=True, elem_id="batch-log",
                     )
 
             batch_btn.click(
@@ -738,4 +442,4 @@ with gr.Blocks(title="4K Upscaler") as app:
 
 
 if __name__ == "__main__":
-    app.launch(inbrowser=True, theme=gr.themes.Base(), css=CSS)
+    app.launch(inbrowser=True, css=CSS)
