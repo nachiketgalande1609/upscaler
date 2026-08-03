@@ -116,6 +116,7 @@ class _HATUpsampler:
 
     def __init__(self, hat_model: torch.nn.Module, scale: int):
         self.model = hat_model
+        self._window_size = hat_model.window_size  # cache before model may be swapped
         self.scale = scale
         self.tile_size = 0   # set by caller, same as RealESRGANer
         self.tile_pad = 32
@@ -133,7 +134,7 @@ class _HATUpsampler:
             t = t.half()
         t = t.to(_DEVICE)
 
-        ws = self.model.window_size  # 16
+        ws = self._window_size  # 16 — cached at init, survives _CountingWrapper swap
 
         with torch.no_grad():
             if self.tile_size > 0:
