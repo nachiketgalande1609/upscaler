@@ -129,10 +129,7 @@ class _HATUpsampler:
         # BGR uint8/16 → RGB float [0,1] NCHW
         img_f = img_bgr.astype(np.float32) / max_val
         img_rgb = img_f[:, :, ::-1].copy()
-        t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0)
-        if _USE_HALF:
-            t = t.half()
-        t = t.to(_DEVICE)
+        t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0).to(_DEVICE)
 
         ws = self._window_size  # 16 — cached at init, survives _CountingWrapper swap
 
@@ -210,9 +207,7 @@ def _get_upsampler(model_key: str):
             key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
             hat.load_state_dict(loadnet[key] if key else loadnet, strict=True)
             hat.eval()
-            if _USE_HALF:
-                hat = hat.half()
-            hat = hat.to(_DEVICE)
+            hat = hat.to(_DEVICE)  # HAT stays fp32 — fp16 NaN in attention softmax
             MODEL_CACHE[model_key] = _HATUpsampler(hat, scale)
         else:
             from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -274,8 +269,10 @@ def upscale_single(image, model_key, tile_choice):
         yield gr.update(), gr.update(), _idle(), ""
         return
 
-    _, _, _, scale, _ = MODELS[model_key]
+    _, _, _, scale, is_hat = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
+    if is_hat and tile == 0:
+        tile = 512  # HAT fp32 needs tiling; full-image fp32 OOMs on 8 GB
 
     yield gr.update(), gr.update(), _prog(5, "Loading model…"), ""
     upsampler = _get_upsampler(model_key)
