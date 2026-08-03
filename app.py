@@ -40,11 +40,24 @@ else:
 MODEL_CACHE: dict = {}
 MODEL_DIR = Path("models")
 SUPPORTED = {".jpg", ".jpeg", ".png", ".webp"}
-MODEL_URLS = {
-    4: ("RealESRGAN_x4plus",
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"),
-    2: ("RealESRGAN_x2plus",
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"),
+
+# model_key -> (filename, url, num_blocks, scale)
+MODELS = {
+    "Standard 4x  (best quality)": (
+        "RealESRGAN_x4plus",
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+        23, 4,
+    ),
+    "Fast 4x  (~4× faster, 6-block)": (
+        "RealESRGAN_x4plus_anime_6B",
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
+        6, 4,
+    ),
+    "Standard 2x": (
+        "RealESRGAN_x2plus",
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+        23, 2,
+    ),
 }
 
 
@@ -73,17 +86,18 @@ def _download_model(model_name, url):
     return path
 
 
-def _get_upsampler(scale):
-    if scale not in MODEL_CACHE:
+def _get_upsampler(model_key: str):
+    if model_key not in MODEL_CACHE:
         from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer
-        name, url = MODEL_URLS[scale]
+        name, url, num_blocks, scale = MODELS[model_key]
         path = _download_model(name, url)
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
-        MODEL_CACHE[scale] = RealESRGANer(
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                        num_block=num_blocks, num_grow_ch=32, scale=scale)
+        MODEL_CACHE[model_key] = RealESRGANer(
             scale=scale, model_path=str(path), model=model,
             tile=0, tile_pad=10, pre_pad=0, half=_USE_HALF)
-    return MODEL_CACHE[scale]
+    return MODEL_CACHE[model_key]
 
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
@@ -129,17 +143,17 @@ def _info(w, h, ow, oh, scale):
 
 # ── Processing ────────────────────────────────────────────────────────────────
 
-def upscale_single(image, scale_choice, tile_choice):
+def upscale_single(image, model_key, tile_choice):
     if image is None:
         gr.Warning("Upload an image first.")
         yield gr.update(), gr.update(), _idle(), ""
         return
 
-    scale = int(scale_choice[0])
+    _, _, _, scale = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
     yield gr.update(), gr.update(), _prog(5, "Loading model…"), ""
-    upsampler = _get_upsampler(scale)
+    upsampler = _get_upsampler(model_key)
     upsampler.tile_size = tile
 
     img_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -195,7 +209,7 @@ def upscale_single(image, scale_choice, tile_choice):
     )
 
 
-def upscale_batch(in_folder, out_folder, scale_choice, tile_choice):
+def upscale_batch(in_folder, out_folder, model_key, tile_choice):
     lines = []
     def emit(m):
         lines.append(m); return "\n".join(lines)
@@ -209,11 +223,11 @@ def upscale_batch(in_folder, out_folder, scale_choice, tile_choice):
     if not imgs: yield f"No supported images in {src}"; return
 
     dst.mkdir(parents=True, exist_ok=True)
-    scale = int(scale_choice[0])
+    _, _, _, scale = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
 
     yield emit("Loading model…")
-    try: up = _get_upsampler(scale)
+    try: up = _get_upsampler(model_key)
     except Exception as e: yield emit(f"Error: {e}"); return
     up.tile_size = tile
     yield emit(f"Ready on {_DEVICE.upper()} — {len(imgs)} image(s)\n")
@@ -372,8 +386,11 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
                 with gr.Column(scale=1, min_width=260, elem_id="sidebar"):
                     gr.HTML('<div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#444;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #1e1e28">Settings</div>')
 
-                    scale_radio = gr.Radio(
-                        choices=["2x", "4x"], value="4x", label="Scale factor",
+                    model_drop = gr.Dropdown(
+                        choices=list(MODELS.keys()),
+                        value="Standard 4x  (best quality)",
+                        label="Model",
+                        info="Fast 4x is ~4× quicker with nearly identical quality.",
                     )
                     gr.HTML('<div style="height:4px"></div>')
                     tile_drop = gr.Dropdown(
@@ -409,7 +426,7 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
 
             run_btn.click(
                 fn=upscale_single,
-                inputs=[input_img, scale_radio, tile_drop],
+                inputs=[input_img, model_drop, tile_drop],
                 outputs=[output_img, download_file, progress_html, result_info],
             )
 
@@ -421,9 +438,12 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
                     in_folder  = gr.Textbox(label="Input folder",  placeholder=r"C:\Users\you\photos")
                     out_folder = gr.Textbox(label="Output folder", placeholder=r"C:\Users\you\photos_4k")
                     gr.HTML('<div style="height:4px"></div>')
-                    with gr.Row():
-                        batch_scale = gr.Radio(["2x","4x"], value="4x", label="Scale")
-                        batch_tile  = gr.Dropdown(["None","512","256"], value="None", label="Tile size")
+                    batch_model = gr.Dropdown(
+                        choices=list(MODELS.keys()),
+                        value="Standard 4x  (best quality)",
+                        label="Model",
+                    )
+                    batch_tile  = gr.Dropdown(["None","512","256"], value="None", label="Tile size")
                     gr.HTML('<div style="height:12px"></div>')
                     batch_btn = gr.Button("Run Batch", variant="primary", elem_id="batch-run-btn")
                     gr.Markdown("Processes every JPG, PNG, and WEBP in the input folder.")
@@ -436,7 +456,7 @@ with gr.Blocks(title="4K Upscaler", theme=gr.themes.Base(), css=CSS) as app:
 
             batch_btn.click(
                 fn=upscale_batch,
-                inputs=[in_folder, out_folder, batch_scale, batch_tile],
+                inputs=[in_folder, out_folder, batch_model, batch_tile],
                 outputs=batch_log,
             )
 
