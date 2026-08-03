@@ -436,7 +436,7 @@ class HAT(nn.Module):
         x = (x - self.mean) * self.img_range
 
         x_size = (x.shape[2], x.shape[3])
-        attn_mask = self._calc_mask(x_size).to(x.device)
+        attn_mask = self._calc_mask(x_size).to(device=x.device, dtype=x.dtype)
         params = {
             'attn_mask': attn_mask,
             'rpi_sa': self.relative_position_index_SA,
