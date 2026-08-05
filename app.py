@@ -19,18 +19,22 @@ import torch
 if torch.cuda.is_available():
     _DEVICE = "cuda"
     _USE_HALF = True
+    # bfloat16 has fp32 exponent range — no softmax overflow/NaN in HAT attention
+    _USE_BF16_HAT = torch.cuda.get_device_capability()[0] >= 8  # Ampere+ (RTX 3000+)
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     _gpu_name = torch.cuda.get_device_name(0)
     _vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
-    _DEVICE_LABEL = f"{_gpu_name} · {_vram_gb:.0f} GB VRAM · fp16"
+    _hat_prec = "bf16" if _USE_BF16_HAT else "fp16"
+    _DEVICE_LABEL = f"{_gpu_name} · {_vram_gb:.0f} GB VRAM · fp16 (HAT: {_hat_prec})"
     _DEVICE_SHORT = f"GPU · {_gpu_name}"
     _DOT = "#4ade80"; _DOT_BG = "rgba(74,222,128,0.12)"; _DOT_BD = "rgba(74,222,128,0.3)"
     print(f"Device: {_DEVICE_LABEL}")
 else:
     _DEVICE = "cpu"
     _USE_HALF = False
+    _USE_BF16_HAT = False
     torch.set_num_threads(os.cpu_count() or 8)
     _DEVICE_LABEL = f"CPU · {os.cpu_count()} threads · fp32"
     _DEVICE_SHORT = f"CPU · {os.cpu_count()} threads"
@@ -129,7 +133,10 @@ class _HATUpsampler:
         # BGR uint8/16 → RGB float [0,1] NCHW
         img_f = img_bgr.astype(np.float32) / max_val
         img_rgb = img_f[:, :, ::-1].copy()
-        t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0).to(_DEVICE)
+        t = torch.from_numpy(img_rgb.transpose(2, 0, 1)).unsqueeze(0)
+        if _USE_BF16_HAT:
+            t = t.to(torch.bfloat16)
+        t = t.to(_DEVICE)
 
         ws = self._window_size  # 16 — cached at init, survives _CountingWrapper swap
 
@@ -210,7 +217,9 @@ def _get_upsampler(model_key: str):
             key = 'params_ema' if 'params_ema' in loadnet else ('params' if 'params' in loadnet else None)
             hat.load_state_dict(loadnet[key] if key else loadnet, strict=True)
             hat.eval()
-            hat = hat.to(_DEVICE)  # HAT stays fp32 — fp16 NaN in attention softmax
+            if _USE_BF16_HAT:
+                hat = hat.to(torch.bfloat16)  # bf16: fp32 exp range, no softmax NaN
+            hat = hat.to(_DEVICE)
             MODEL_CACHE[model_key] = _HATUpsampler(hat, scale)
         else:
             from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -275,7 +284,7 @@ def upscale_single(image, model_key, tile_choice):
     _, _, _, scale, is_hat = MODELS[model_key]
     tile = 0 if tile_choice == "None" else int(tile_choice)
     if is_hat and tile == 0:
-        tile = 256  # HAT fp32 attention per 256-tile ≈ 400 MB; 512 grows pool >8 GB
+        tile = 512  # HAT bf16 attention per 512-tile ≈ 800 MB — safe on 8 GB
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()  # release pool from any prior OOM crash
