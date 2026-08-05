@@ -1,0 +1,43 @@
+(venv) PS C:\Users\nachi\OneDrive\Desktop\upscaler> python app.py                                                                                                                              
+Device: NVIDIA GeForce RTX 4060 Laptop GPU · 8 GB VRAM · fp16
+* Running on local URL:  http://127.0.0.1:7860
+* To create a public link, set `share=True` in `launch()`.
+C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\torch\functional.py:539: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\TensorShape.cpp:3638.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+Traceback (most recent call last):
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\queueing.py", line 963, in process_events
+    response = await route_utils.call_process_api(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\route_utils.py", line 408, in call_process_api
+    output = await app.get_blocks().process_api(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\blocks.py", line 2316, in process_api
+    result = await self.call_function(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\blocks.py", line 1695, in call_function
+    prediction = await utils.async_iteration(iterator)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\utils.py", line 924, in async_iteration
+    return await anext(iterator)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\utils.py", line 906, in __anext__
+    return await anyio.to_thread.run_sync(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2641, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1033, in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\utils.py", line 889, in run_sync_iterator_async
+    return next(iterator)
+           ^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\venv\Lib\site-packages\gradio\utils.py", line 1097, in gen_wrapper
+    response = next(iterator)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\nachi\OneDrive\Desktop\upscaler\app.py", line 318, in upscale_single
+    raise gr.Error(f"Failed: {exc_h[0]}")
+gradio.exceptions.Error: 'Failed: CUDA out of memory. Tried to allocate 3.81 GiB. GPU 0 has a total capacity of 8.00 GiB of which 0 bytes is free. Of the allocated memory 11.37 GiB is allocated by PyTorch, and 415.34 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)'
