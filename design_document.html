@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Upscaler — Design Document</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  :root {
+    --accent:   #7c3aed;
+    --accent2:  #a78bfa;
+    --accent3:  #4c1d95;
+    --green:    #10b981;
+    --amber:    #f59e0b;
+    --red:      #ef4444;
+    --blue:     #3b82f6;
+    --ink:      #0f172a;
+    --ink2:     #1e293b;
+    --ink3:     #334155;
+    --muted:    #64748b;
+    --subtle:   #cbd5e1;
+    --surface:  #f8fafc;
+    --white:    #ffffff;
+    --border:   #e2e8f0;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── Page layout ── */
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto 20px;
+    background: white;
+    box-shadow: 0 4px 40px rgba(0,0,0,.12);
+    position: relative;
+    overflow: hidden;
+  }
+  .page-inner { padding: 16mm 18mm; }
+
+  /* ── Cover page ── */
+  .cover {
+    background: linear-gradient(145deg, #0f0320 0%, #1a0640 40%, #2d1060 100%);
+    min-height: 297mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0;
+    color: white;
+  }
+  .cover-top { padding: 14mm 18mm 0; }
+  .cover-logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 8px 14px;
+  }
+  .cover-logo-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cover-logo-text { font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+  .cover-hero { padding: 18mm 18mm 0; }
+  .cover-tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+    color: var(--accent2); margin-bottom: 18px; display: block;
+  }
+  .cover-title {
+    font-size: 46px; font-weight: 900; line-height: 1.05;
+    letter-spacing: -.03em; margin-bottom: 12px;
+  }
+  .cover-title span { color: var(--accent2); }
+  .cover-subtitle {
+    font-size: 16px; color: rgba(255,255,255,.55); max-width: 400px;
+    font-weight: 400; line-height: 1.6;
+  }
+
+  /* Decorative grid on cover */
+  .cover-grid {
+    position: absolute; bottom: 0; right: 0;
+    width: 260px; height: 220px; opacity: .06;
+  }
+
+  .cover-meta {
+    padding: 12mm 18mm;
+    border-top: 1px solid rgba(255,255,255,.1);
+    display: flex; gap: 36px;
+  }
+  .meta-item { display: flex; flex-direction: column; gap: 3px; }
+  .meta-label { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.3); }
+  .meta-value { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.85); }
+
+  .cover-chips {
+    padding: 0 18mm 14mm;
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px;
+  }
+  .chip {
+    font-size: 11px; font-weight: 600; padding: 4px 12px;
+    border-radius: 99px; border: 1px solid rgba(255,255,255,.15);
+    color: rgba(255,255,255,.65); background: rgba(255,255,255,.06);
+  }
+
+  /* ── TOC page ── */
+  .toc-item {
+    display: flex; align-items: baseline; gap: 0;
+    padding: 9px 0; border-bottom: 1px solid var(--border);
+  }
+  .toc-num { font-size: 11px; font-weight: 700; color: var(--accent2); width: 32px; flex-shrink: 0; }
+  .toc-title { font-size: 14px; font-weight: 500; flex: 1; }
+  .toc-dots { flex: 1; border-bottom: 2px dotted var(--border); margin: 0 12px 3px; }
+  .toc-page { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Section header ── */
+  .section-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 22px; padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-num {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent3), var(--accent));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; color: white; flex-shrink: 0;
+  }
+  .section-title-wrap { display: flex; flex-direction: column; gap: 1px; }
+  .section-label { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .section-title { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); }
+
+  h3 { font-size: 15px; font-weight: 700; color: var(--ink2); margin: 20px 0 10px; }
+  h4 { font-size: 13px; font-weight: 700; color: var(--ink3); margin: 14px 0 8px; letter-spacing: .01em; }
+  p { color: var(--ink3); margin-bottom: 10px; font-size: 13.5px; line-height: 1.65; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .card-grid { display: grid; gap: 12px; }
+  .card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .card-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .card-grid.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+  .stat-card {
+    background: white; border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .stat-card .val { font-size: 26px; font-weight: 800; letter-spacing: -.03em; }
+  .stat-card .lbl { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  thead tr { background: var(--ink); color: white; }
+  thead th { padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { padding: 9px 12px; color: var(--ink3); }
+  tbody tr:nth-child(even) { background: var(--surface); }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  }
+  .badge-green { background: #dcfce7; color: #166534; }
+  .badge-amber { background: #fef3c7; color: #92400e; }
+  .badge-red   { background: #fee2e2; color: #991b1b; }
+  .badge-blue  { background: #dbeafe; color: #1e40af; }
+  .badge-violet{ background: #ede9fe; color: #4c1d95; }
+
+  /* ── Code ── */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 5px; color: var(--accent);
+  }
+  pre {
+    background: var(--ink); color: #e2e8f0; border-radius: 10px;
+    padding: 14px 16px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px; line-height: 1.7; overflow: hidden;
+    margin: 12px 0;
+  }
+
+  /* ── Dividers ── */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .spacer-sm { height: 12px; }
+  .spacer-md { height: 24px; }
+  .spacer-lg { height: 40px; }
+
+  /* ── Info boxes ── */
+  .info-box {
+    border-left: 3px solid; padding: 12px 14px; border-radius: 0 8px 8px 0;
+    margin: 14px 0; font-size: 13px;
+  }
+  .info-box.violet { border-color: var(--accent); background: #f5f3ff; color: var(--accent3); }
+  .info-box.green  { border-color: var(--green);  background: #f0fdf4; color: #14532d; }
+  .info-box.amber  { border-color: var(--amber);  background: #fffbeb; color: #78350f; }
+
+  /* ── Print ── */
+  @media print {
+    body { background: white; }
+    .page { box-shadow: none; margin: 0; width: 100%; page-break-after: always; }
+    .page:last-child { page-break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 1: COVER -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page cover">
+  <div class="cover-top">
+    <div class="cover-logo">
+      <div class="cover-logo-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        </svg>
+      </div>
+      <span class="cover-logo-text">AI Upscaler</span>
+    </div>
+  </div>
+
+  <!-- Decorative background SVG -->
+  <svg class="cover-grid" viewBox="0 0 260 220" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
+        <path d="M 26 0 L 0 0 0 26" fill="none" stroke="white" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="260" height="220" fill="url(#grid)"/>
+  </svg>
+
+  <div class="cover-hero">
+    <span class="cover-tag">Design Document · v1.0</span>
+    <h1 class="cover-title">AI Image<br><span>Upscaler</span></h1>
+    <p class="cover-subtitle">
+      A local, GPU-accelerated image super-resolution tool powered by Real-HAT and Real-ESRGAN, with a real-time browser UI.
+    </p>
+    <div class="cover-chips">
+      <span class="chip">Real-HAT 4x</span>
+      <span class="chip">Real-ESRGAN 4x</span>
+      <span class="chip">FastAPI</span>
+      <span class="chip">PyTorch</span>
+      <span class="chip">CUDA / BF16</span>
+      <span class="chip">Server-Sent Events</span>
+      <span class="chip">Tiled Inference</span>
+    </div>
+  </div>
+
+  <div style="flex:1;"></div>
+
+  <div class="cover-meta">
+    <div class="meta-item">
+      <span class="meta-label">Document Type</span>
+      <span class="meta-value">System Design Document</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Version</span>
+      <span class="meta-value">1.0</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Stack</span>
+      <span class="meta-value">Python · FastAPI · PyTorch</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Target Hardware</span>
+      <span class="meta-value">NVIDIA GPU (CUDA)</span>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 2: TABLE OF CONTENTS + PROJECT OVERVIEW -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num" style="background:var(--ink);">≡</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Navigation</span>
+      <span class="section-title">Table of Contents</span>
+    </div>
+  </div>
+
+  <div class="toc-item"><span class="toc-num">01</span><span class="toc-title">Project Overview</span><span class="toc-dots"></span><span class="toc-page">3</span></div>
+  <div class="toc-item"><span class="toc-num">02</span><span class="toc-title">System Architecture</span><span class="toc-dots"></span><span class="toc-page">4</span></div>
+  <div class="toc-item"><span class="toc-num">03</span><span class="toc-title">Data Flow & Request Lifecycle</span><span class="toc-dots"></span><span class="toc-page">5</span></div>
+  <div class="toc-item"><span class="toc-num">04</span><span class="toc-title">Model Comparison & Benchmarks</span><span class="toc-dots"></span><span class="toc-page">6</span></div>
+  <div class="toc-item"><span class="toc-num">05</span><span class="toc-title">Tiling Strategy & Memory Management</span><span class="toc-dots"></span><span class="toc-page">7</span></div>
+  <div class="toc-item"><span class="toc-num">06</span><span class="toc-title">Numerical Precision Strategy</span><span class="toc-dots"></span><span class="toc-page">8</span></div>
+  <div class="toc-item"><span class="toc-num">07</span><span class="toc-title">API Reference</span><span class="toc-dots"></span><span class="toc-page">9</span></div>
+  <div class="toc-item"><span class="toc-num">08</span><span class="toc-title">UI/UX Design</span><span class="toc-dots"></span><span class="toc-page">10</span></div>
+  <div class="toc-item"><span class="toc-num">09</span><span class="toc-title">Known Issues & Solutions</span><span class="toc-dots"></span><span class="toc-page">11</span></div>
+
+  <div class="spacer-lg"></div>
+
+  <!-- Quick stats row -->
+  <div class="card-grid cols-4">
+    <div class="stat-card">
+      <span class="val" style="color:var(--accent);">4</span>
+      <span class="lbl">AI Models</span>
+    </div>
+    <div class="stat-card">
+      <span class="val" style="color:var(--green);">4×</span>
+      <span class="lbl">Max Upscale</span>
+    </div>
+    <div class="stat-card">
+      <span class="val" style="color:var(--amber);">6</span>
+      <span class="lbl">API Endpoints</span>
+    </div>
+    <div class="stat-card">
+      <span class="val" style="color:var(--blue);">BF16</span>
+      <span class="lbl">HAT Precision</span>
+    </div>
+  </div>
+
+  <div class="spacer-lg"></div>
+
+  <div class="section-header">
+    <div class="section-num">01</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 1</span>
+      <span class="section-title">Project Overview</span>
+    </div>
+  </div>
+
+  <p>AI Upscaler is a local, browser-based image super-resolution tool that runs entirely on the user's own hardware. It exposes a FastAPI web server that serves both the UI and inference endpoints, making it accessible from any browser on the local network without requiring any cloud account or API key.</p>
+
+  <p>The application supports two primary workflows — <strong>single image</strong> upscaling with a before/after comparison slider, and <strong>batch folder</strong> processing with live per-image preview. Both workflows stream real-time tile-level progress to the browser via Server-Sent Events.</p>
+
+  <div class="card-grid cols-2" style="margin-top:16px;">
+    <div class="card">
+      <h4 style="color:var(--accent);margin-top:0;">Core Goals</h4>
+      <ul style="padding-left:16px;color:var(--ink3);font-size:13px;line-height:1.9;">
+        <li>Zero-cloud: all inference runs locally</li>
+        <li>Best-in-class quality via Real-HAT</li>
+        <li>Low VRAM footprint via tiling + BF16</li>
+        <li>Real-time progress feedback</li>
+        <li>Simple drag-and-drop UX</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4 style="color:var(--accent);margin-top:0;">Non-Goals</h4>
+      <ul style="padding-left:16px;color:var(--ink3);font-size:13px;line-height:1.9;">
+        <li>Cloud or SaaS deployment</li>
+        <li>Real-time video upscaling</li>
+        <li>Training or fine-tuning models</li>
+        <li>Face restoration (GFPGAN)</li>
+        <li>Mobile or tablet support</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 3: SYSTEM ARCHITECTURE -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">02</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 2</span>
+      <span class="section-title">System Architecture</span>
+    </div>
+  </div>
+
+  <p>The application follows a <strong>monolithic single-process design</strong> — the FastAPI server, model inference, and HTML delivery all run within the same Python process. This simplifies deployment (one command to start) while still achieving concurrency through Python threads for inference and <code>asyncio</code> for HTTP.</p>
+
+  <!-- Architecture SVG -->
+  <svg viewBox="0 0 580 330" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:16px 0;">
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#7c3aed"/>
+      </marker>
+      <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#64748b"/>
+      </marker>
+    </defs>
+
+    <!-- Browser box -->
+    <rect x="10" y="20" width="130" height="290" rx="10" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+    <rect x="10" y="20" width="130" height="30" rx="10" fill="#7c3aed"/>
+    <rect x="10" y="38" width="130" height="12" fill="#7c3aed"/>
+    <text x="75" y="40" text-anchor="middle" font-size="11" font-weight="700" fill="white">Browser</text>
+
+    <rect x="22" y="64" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="82" text-anchor="middle" font-size="10" fill="#334155">UI (HTML/CSS/JS)</text>
+
+    <rect x="22" y="100" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="118" text-anchor="middle" font-size="10" fill="#334155">Drag-Drop Upload</text>
+
+    <rect x="22" y="136" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="154" text-anchor="middle" font-size="10" fill="#334155">SSE Event Listener</text>
+
+    <rect x="22" y="172" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="190" text-anchor="middle" font-size="10" fill="#334155">Tile Grid Renderer</text>
+
+    <rect x="22" y="208" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="226" text-anchor="middle" font-size="10" fill="#334155">Comparison Slider</text>
+
+    <rect x="22" y="244" width="106" height="28" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="75" y="262" text-anchor="middle" font-size="10" fill="#334155">Batch Log Feed</text>
+
+    <!-- FastAPI box -->
+    <rect x="210" y="20" width="150" height="290" rx="10" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/>
+    <rect x="210" y="20" width="150" height="30" rx="10" fill="#059669"/>
+    <rect x="210" y="38" width="150" height="12" fill="#059669"/>
+    <text x="285" y="40" text-anchor="middle" font-size="11" font-weight="700" fill="white">FastAPI Server</text>
+
+    <rect x="222" y="64" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="79" text-anchor="middle" font-size="9.5" fill="#334155">GET /  → HTML template</text>
+
+    <rect x="222" y="92" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="107" text-anchor="middle" font-size="9.5" fill="#334155">POST /upscale</text>
+
+    <rect x="222" y="120" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="135" text-anchor="middle" font-size="9.5" fill="#334155">GET /progress/{id} SSE</text>
+
+    <rect x="222" y="148" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="163" text-anchor="middle" font-size="9.5" fill="#334155">GET /result/{id}</text>
+
+    <rect x="222" y="176" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="191" text-anchor="middle" font-size="9.5" fill="#334155">POST /batch</text>
+
+    <rect x="222" y="204" width="126" height="22" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="285" y="219" text-anchor="middle" font-size="9.5" fill="#334155">GET /batch-progress/{id}</text>
+
+    <!-- Task store -->
+    <rect x="222" y="240" width="126" height="34" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+    <text x="285" y="255" text-anchor="middle" font-size="9.5" font-weight="700" fill="#78350f">_tasks dict</text>
+    <text x="285" y="268" text-anchor="middle" font-size="9" fill="#92400e">In-memory task state</text>
+
+    <!-- Inference box -->
+    <rect x="430" y="20" width="140" height="290" rx="10" fill="#fef3f2" stroke="#ef4444" stroke-width="1.5"/>
+    <rect x="430" y="20" width="140" height="30" rx="10" fill="#dc2626"/>
+    <rect x="430" y="38" width="140" height="12" fill="#dc2626"/>
+    <text x="500" y="40" text-anchor="middle" font-size="11" font-weight="700" fill="white">Inference Layer</text>
+
+    <rect x="442" y="64" width="116" height="34" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="500" y="77" text-anchor="middle" font-size="9.5" font-weight="700" fill="#334155">Model Cache</text>
+    <text x="500" y="91" text-anchor="middle" font-size="9" fill="#64748b">(dict, GPU memory)</text>
+
+    <rect x="442" y="106" width="116" height="46" rx="5" fill="#ede9fe" stroke="#a78bfa" stroke-width="1"/>
+    <text x="500" y="120" text-anchor="middle" font-size="9.5" font-weight="700" fill="#4c1d95">Real-HAT</text>
+    <text x="500" y="133" text-anchor="middle" font-size="9" fill="#6d28d9">Transformer · BF16</text>
+    <text x="500" y="145" text-anchor="middle" font-size="9" fill="#6d28d9">hat_arch.py</text>
+
+    <rect x="442" y="160" width="116" height="46" rx="5" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
+    <text x="500" y="174" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1e40af">Real-ESRGAN</text>
+    <text x="500" y="187" text-anchor="middle" font-size="9" fill="#1d4ed8">CNN · FP16</text>
+    <text x="500" y="199" text-anchor="middle" font-size="9" fill="#1d4ed8">RRDBNet</text>
+
+    <rect x="442" y="214" width="116" height="34" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="500" y="228" text-anchor="middle" font-size="9.5" font-weight="700" fill="#334155">_CountingWrapper</text>
+    <text x="500" y="241" text-anchor="middle" font-size="9" fill="#64748b">Tile progress hook</text>
+
+    <rect x="442" y="256" width="116" height="34" rx="5" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="500" y="270" text-anchor="middle" font-size="9.5" font-weight="700" fill="#334155">CUDA / CPU</text>
+    <text x="500" y="283" text-anchor="middle" font-size="9" fill="#64748b">torch device</text>
+
+    <!-- Arrows: Browser → FastAPI -->
+    <line x1="140" y1="80" x2="208" y2="80" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="174" y="74" text-anchor="middle" font-size="9" fill="#7c3aed">HTTP</text>
+
+    <line x1="140" y1="150" x2="208" y2="150" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="208" y1="115" x2="140" y2="115" stroke="#64748b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr2)"/>
+    <text x="174" y="108" text-anchor="middle" font-size="9" fill="#64748b">SSE</text>
+
+    <!-- Arrows: FastAPI → Inference -->
+    <line x1="360" y1="100" x2="428" y2="100" stroke="#059669" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="394" y="94" text-anchor="middle" font-size="9" fill="#059669">spawn thread</text>
+
+    <line x1="428" y1="140" x2="360" y2="140" stroke="#64748b" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr2)"/>
+    <text x="394" y="134" text-anchor="middle" font-size="9" fill="#64748b">poll counter</text>
+  </svg>
+
+  <div class="card-grid cols-3" style="margin-top:8px;">
+    <div class="card">
+      <h4 style="margin-top:0;color:var(--accent);">Concurrency Model</h4>
+      <p style="font-size:12.5px;margin:0;">FastAPI runs on asyncio. Inference runs in a daemon thread so the event loop stays unblocked. Progress polling uses <code>time.sleep(0.25)</code> in the inference thread, not asyncio.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0;color:var(--green);">State Management</h4>
+      <p style="font-size:12.5px;margin:0;">All task state lives in <code>_tasks</code>, a plain Python dict keyed by UUID. SSE generators read from this dict every 200ms. No database or message queue required.</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0;color:var(--blue);">Model Caching</h4>
+      <p style="font-size:12.5px;margin:0;">Loaded models are stored in <code>MODEL_CACHE</code> and reused across requests. Loading HAT takes ~3–5s; subsequent requests start instantly.</p>
+    </div>
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 4: DATA FLOW -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">03</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 3</span>
+      <span class="section-title">Data Flow &amp; Request Lifecycle</span>
+    </div>
+  </div>
+
+  <h3>Single Image Upscale — Full Request Lifecycle</h3>
+
+  <!-- Lifecycle flow SVG -->
+  <svg viewBox="0 0 560 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:12px 0;">
+    <defs>
+      <marker id="a3" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L7,3 z" fill="#475569"/>
+      </marker>
+    </defs>
+
+    <!-- Steps -->
+    <g transform="translate(10,10)">
+      <!-- Step boxes -->
+      <rect x="0"   y="30" width="72" height="50" rx="8" fill="#ede9fe" stroke="#a78bfa" stroke-width="1.5"/>
+      <rect x="96"  y="30" width="72" height="50" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+      <rect x="192" y="30" width="72" height="50" rx="8" fill="#dcfce7" stroke="#10b981" stroke-width="1.5"/>
+      <rect x="288" y="30" width="72" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+      <rect x="384" y="30" width="72" height="50" rx="8" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+      <rect x="480" y="30" width="72" height="50" rx="8" fill="#ede9fe" stroke="#a78bfa" stroke-width="1.5"/>
+
+      <!-- Step numbers -->
+      <circle cx="36"  cy="18" r="10" fill="#7c3aed"/><text x="36"  y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">1</text>
+      <circle cx="132" cy="18" r="10" fill="#3b82f6"/><text x="132" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">2</text>
+      <circle cx="228" cy="18" r="10" fill="#10b981"/><text x="228" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">3</text>
+      <circle cx="324" cy="18" r="10" fill="#f59e0b"/><text x="324" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">4</text>
+      <circle cx="420" cy="18" r="10" fill="#ef4444"/><text x="420" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">5</text>
+      <circle cx="516" cy="18" r="10" fill="#7c3aed"/><text x="516" y="22" text-anchor="middle" font-size="10" font-weight="700" fill="white">6</text>
+
+      <!-- Step labels -->
+      <text x="36"  y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#4c1d95">Upload</text>
+      <text x="36"  y="65" text-anchor="middle" font-size="9" fill="#6d28d9">POST /upscale</text>
+      <text x="36"  y="77" text-anchor="middle" font-size="9" fill="#6d28d9">multipart file</text>
+
+      <text x="132" y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1e40af">Decode</text>
+      <text x="132" y="65" text-anchor="middle" font-size="9" fill="#1d4ed8">cv2.imdecode</text>
+      <text x="132" y="77" text-anchor="middle" font-size="9" fill="#1d4ed8">numpy array</text>
+
+      <text x="228" y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#14532d">Load Model</text>
+      <text x="228" y="65" text-anchor="middle" font-size="9" fill="#166534">from cache or</text>
+      <text x="228" y="77" text-anchor="middle" font-size="9" fill="#166534">download + load</text>
+
+      <text x="324" y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#78350f">Tile &amp; Infer</text>
+      <text x="324" y="65" text-anchor="middle" font-size="9" fill="#92400e">N tiles · GPU</text>
+      <text x="324" y="77" text-anchor="middle" font-size="9" fill="#92400e">+SSE updates</text>
+
+      <text x="420" y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#991b1b">Merge + Save</text>
+      <text x="420" y="65" text-anchor="middle" font-size="9" fill="#b91c1c">Stitch tiles</text>
+      <text x="420" y="77" text-anchor="middle" font-size="9" fill="#b91c1c">write .png</text>
+
+      <text x="516" y="51" text-anchor="middle" font-size="9.5" font-weight="700" fill="#4c1d95">Deliver</text>
+      <text x="516" y="65" text-anchor="middle" font-size="9" fill="#6d28d9">GET /result</text>
+      <text x="516" y="77" text-anchor="middle" font-size="9" fill="#6d28d9">FileResponse</text>
+
+      <!-- Arrows -->
+      <line x1="72"  y1="55" x2="94"  y2="55" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+      <line x1="168" y1="55" x2="190" y2="55" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+      <line x1="264" y1="55" x2="286" y2="55" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+      <line x1="360" y1="55" x2="382" y2="55" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+      <line x1="456" y1="55" x2="478" y2="55" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+
+      <!-- SSE annotation -->
+      <path d="M324,82 Q324,130 132,130 Q36,130 36,140" fill="none" stroke="#7c3aed" stroke-width="1" stroke-dasharray="4,2"/>
+      <text x="200" y="125" text-anchor="middle" font-size="9" fill="#7c3aed">SSE progress events streamed to browser every 250ms</text>
+    </g>
+  </svg>
+
+  <h3>Batch Processing — Parallelism &amp; Thread Model</h3>
+
+  <!-- Batch flow SVG -->
+  <svg viewBox="0 0 560 170" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:12px 0;">
+    <!-- Main thread column -->
+    <rect x="0" y="0" width="140" height="160" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="0" y="0" width="140" height="28" rx="8" fill="#1e293b"/>
+    <rect x="0" y="16" width="140" height="12" fill="#1e293b"/>
+    <text x="70" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="white">HTTP Thread (asyncio)</text>
+    <text x="70" y="50"  text-anchor="middle" font-size="9.5" fill="#334155">POST /batch</text>
+    <text x="70" y="67"  text-anchor="middle" font-size="9" fill="#64748b">↓ spawn daemon thread</text>
+    <text x="70" y="84"  text-anchor="middle" font-size="9.5" fill="#334155">GET /batch-progress SSE</text>
+    <text x="70" y="101" text-anchor="middle" font-size="9" fill="#64748b">↓ reads _tasks every 250ms</text>
+    <text x="70" y="118" text-anchor="middle" font-size="9.5" fill="#334155">GET /result (each file)</text>
+    <text x="70" y="135" text-anchor="middle" font-size="9" fill="#64748b">FileResponse</text>
+
+    <!-- Batch worker column -->
+    <rect x="158" y="0" width="180" height="160" rx="8" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/>
+    <rect x="158" y="0" width="180" height="28" rx="8" fill="#059669"/>
+    <rect x="158" y="16" width="180" height="12" fill="#059669"/>
+    <text x="248" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="white">_run_batch (daemon thread)</text>
+    <text x="248" y="45"  text-anchor="middle" font-size="9.5" fill="#334155">for each image in folder:</text>
+    <text x="248" y="61"  text-anchor="middle" font-size="9" fill="#64748b">1. read + make preview b64</text>
+    <text x="248" y="77"  text-anchor="middle" font-size="9" fill="#64748b">2. wrap model with Counter</text>
+    <text x="248" y="93"  text-anchor="middle" font-size="9" fill="#64748b">3. spawn tile-thread</text>
+    <text x="248" y="109" text-anchor="middle" font-size="9" fill="#64748b">4. poll counter → _tasks</text>
+    <text x="248" y="125" text-anchor="middle" font-size="9" fill="#64748b">5. join + save output</text>
+    <text x="248" y="141" text-anchor="middle" font-size="9" fill="#64748b">6. clear preview b64</text>
+
+    <!-- Tile thread column -->
+    <rect x="356" y="0" width="180" height="160" rx="8" fill="#fef3f2" stroke="#ef4444" stroke-width="1.5"/>
+    <rect x="356" y="0" width="180" height="28" rx="8" fill="#dc2626"/>
+    <rect x="356" y="16" width="180" height="12" fill="#dc2626"/>
+    <text x="446" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="white">_do (tile thread, per image)</text>
+    <text x="446" y="45"  text-anchor="middle" font-size="9.5" fill="#334155">upsampler.enhance(bgr)</text>
+    <text x="446" y="61"  text-anchor="middle" font-size="9" fill="#64748b">for each tile:</text>
+    <text x="446" y="77"  text-anchor="middle" font-size="9" fill="#64748b">  model(tile_in) → GPU</text>
+    <text x="446" y="93"  text-anchor="middle" font-size="9" fill="#64748b">  _CountingWrapper.forward()</text>
+    <text x="446" y="109" text-anchor="middle" font-size="9" fill="#64748b">  counter[0] += 1</text>
+    <text x="446" y="125" text-anchor="middle" font-size="9" fill="#64748b">  empty_cache()</text>
+    <text x="446" y="141" text-anchor="middle" font-size="9" fill="#64748b">  stitch tile into output</text>
+
+    <!-- Arrows -->
+    <line x1="140" y1="60" x2="156" y2="60" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+    <line x1="338" y1="80" x2="354" y2="80" stroke="#475569" stroke-width="1.5" marker-end="url(#a3)"/>
+    <line x1="354" y1="105" x2="338" y2="105" stroke="#7c3aed" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#a3)"/>
+    <text x="346" y="99" text-anchor="middle" font-size="8" fill="#7c3aed">counter</text>
+  </svg>
+
+  <div class="info-box violet">
+    <strong>Design decision:</strong> The tile-polling thread inside <code>_run_batch</code> blocks the batch worker thread (via <code>th.join()</code>) until each image is done. Images are processed <em>sequentially</em> — parallel GPU inference would cause OOM on consumer hardware.
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 5: MODEL COMPARISON -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">04</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 4</span>
+      <span class="section-title">Model Comparison &amp; Benchmarks</span>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th><th>Architecture</th><th>Scale</th>
+        <th>Quality</th><th>Speed</th><th>VRAM (512-tile)</th><th>Weight Size</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Real-HAT 4x</strong></td>
+        <td>Transformer (RHAG × 6)</td>
+        <td>4×</td>
+        <td><span class="badge badge-violet">Best</span></td>
+        <td><span class="badge badge-red">Slow</span></td>
+        <td>~800 MB (BF16)</td>
+        <td>~160 MB</td>
+      </tr>
+      <tr>
+        <td><strong>Real-ESRGAN 4x</strong></td>
+        <td>CNN (RRDBNet 23B)</td>
+        <td>4×</td>
+        <td><span class="badge badge-blue">Good</span></td>
+        <td><span class="badge badge-green">Fast</span></td>
+        <td>~1.2 GB (FP16)</td>
+        <td>~67 MB</td>
+      </tr>
+      <tr>
+        <td><strong>Real-ESRGAN 4x Lite</strong></td>
+        <td>CNN (RRDBNet 6B)</td>
+        <td>4×</td>
+        <td><span class="badge badge-amber">OK</span></td>
+        <td><span class="badge badge-green">Fastest</span></td>
+        <td>~400 MB (FP16)</td>
+        <td>~17 MB</td>
+      </tr>
+      <tr>
+        <td><strong>Real-ESRGAN 2x</strong></td>
+        <td>CNN (RRDBNet 23B)</td>
+        <td>2×</td>
+        <td><span class="badge badge-blue">Good</span></td>
+        <td><span class="badge badge-green">Fast</span></td>
+        <td>~600 MB (FP16)</td>
+        <td>~67 MB</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="spacer-md"></div>
+
+  <!-- Bar chart: Quality vs Speed -->
+  <h3>Quality vs Speed Trade-off</h3>
+  <svg viewBox="0 0 540 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:8px 0;">
+    <!-- Axes -->
+    <line x1="80" y1="20" x2="80" y2="150" stroke="#cbd5e1" stroke-width="1.5"/>
+    <line x1="80" y1="150" x2="530" y2="150" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="40" y="90" text-anchor="middle" font-size="10" fill="#64748b" transform="rotate(-90,40,90)">Quality Score</text>
+    <text x="305" y="170" text-anchor="middle" font-size="10" fill="#64748b">Relative Inference Speed →</text>
+
+    <!-- Grid lines -->
+    <line x1="80" y1="50"  x2="530" y2="50"  stroke="#f1f5f9" stroke-width="1"/>
+    <line x1="80" y1="80"  x2="530" y2="80"  stroke="#f1f5f9" stroke-width="1"/>
+    <line x1="80" y1="110" x2="530" y2="110" stroke="#f1f5f9" stroke-width="1"/>
+    <text x="74" y="53"  text-anchor="end" font-size="9" fill="#94a3b8">100</text>
+    <text x="74" y="83"  text-anchor="end" font-size="9" fill="#94a3b8">75</text>
+    <text x="74" y="113" text-anchor="end" font-size="9" fill="#94a3b8">50</text>
+    <text x="74" y="153" text-anchor="end" font-size="9" fill="#94a3b8">0</text>
+
+    <!-- Model dots -->
+    <!-- HAT: quality=95, speed=15 → x=130, y=30 -->
+    <circle cx="130" cy="27" r="12" fill="#7c3aed" opacity=".9"/>
+    <text x="130" y="31" text-anchor="middle" font-size="8" font-weight="700" fill="white">HAT</text>
+    <text x="130" y="16" text-anchor="middle" font-size="9" fill="#4c1d95">4× · Best</text>
+
+    <!-- ESRGAN 4x: quality=78, speed=70 → x=310, y=60 -->
+    <circle cx="310" cy="60" r="12" fill="#3b82f6" opacity=".9"/>
+    <text x="310" y="64" text-anchor="middle" font-size="8" font-weight="700" fill="white">4x</text>
+    <text x="310" y="49" text-anchor="middle" font-size="9" fill="#1e40af">ESRGAN 4×</text>
+
+    <!-- ESRGAN 2x: quality=72, speed=80 → x=360, y=68 -->
+    <circle cx="390" cy="70" r="12" fill="#06b6d4" opacity=".9"/>
+    <text x="390" y="74" text-anchor="middle" font-size="8" font-weight="700" fill="white">2x</text>
+    <text x="390" y="59" text-anchor="middle" font-size="9" fill="#0e7490">ESRGAN 2×</text>
+
+    <!-- ESRGAN Lite: quality=58, speed=95 → x=460, y=88 -->
+    <circle cx="490" cy="91" r="12" fill="#10b981" opacity=".9"/>
+    <text x="490" y="95" text-anchor="middle" font-size="8" font-weight="700" fill="white">Lite</text>
+    <text x="490" y="80" text-anchor="middle" font-size="9" fill="#065f46">Lite 4×</text>
+
+    <!-- Speed axis labels -->
+    <text x="130" y="163" text-anchor="middle" font-size="9" fill="#94a3b8">Slow</text>
+    <text x="310" y="163" text-anchor="middle" font-size="9" fill="#94a3b8">Medium</text>
+    <text x="490" y="163" text-anchor="middle" font-size="9" fill="#94a3b8">Fast</text>
+  </svg>
+
+  <div class="spacer-sm"></div>
+
+  <!-- VRAM bar chart -->
+  <h3>VRAM Usage at Tile Size 512 px</h3>
+  <svg viewBox="0 0 540 130" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:8px 0;">
+    <!-- Axis -->
+    <line x1="140" y1="10" x2="140" y2="100" stroke="#cbd5e1" stroke-width="1.5"/>
+    <line x1="140" y1="100" x2="530" y2="100" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <!-- 8 GB reference line -->
+    <line x1="140" y1="18" x2="530" y2="18" stroke="#ef4444" stroke-width="1" stroke-dasharray="4,2"/>
+    <text x="534" y="22" font-size="9" fill="#ef4444">8 GB limit</text>
+
+    <!-- Bars -->
+    <!-- HAT BF16: ~800MB → 800/8000 = 10% of 390px width → ~39px tall, but let's scale 8GB = 82px -->
+    <!-- Scale: 8000MB = 82px → 1MB = 0.01025px -->
+    <!-- HAT BF16: 800MB → 8.2px... too small. Let's use: 8GB = 82px, so bars: -->
+    <!-- HAT BF16 ~800MB → 8.2px -->
+    <!-- HAT FP16: 1600MB → 16.4px -->
+    <!-- ESRGAN 4x FP16: 1200MB → 12.3px -->
+    <!-- ESRGAN Lite FP16: 400MB → 4.1px -->
+
+    <!-- Actually let me re-scale to be visible. Max bar = 8GB, height = 80px -->
+    <!-- HAT FP32 (old/OOM): 3400MB → 34px -->
+    <!-- HAT BF16 (current): 800MB → 8px ... too small -->
+    <!-- Let me use max = 4000MB = 78px scale -->
+    <!-- HAT BF16: 800 → 15.6px, ESRGAN 4x: 1200 → 23.4px, ESRGAN Lite: 400 → 7.8px, HAT FP32 OOM: 3400 → 66.3px -->
+
+    <!-- Bar 1: HAT FP32 (failed) -->
+    <rect x="160" y="33" width="70" height="67" fill="#fca5a5" stroke="#ef4444" stroke-width="1" rx="4"/>
+    <text x="195" y="29" text-anchor="middle" font-size="9" fill="#991b1b">~3.4 GB</text>
+    <text x="195" y="110" text-anchor="middle" font-size="9" fill="#64748b">HAT</text>
+    <text x="195" y="122" text-anchor="middle" font-size="9" fill="#64748b">FP32 ✗</text>
+
+    <!-- Bar 2: HAT BF16 (current) -->
+    <rect x="248" y="84" width="70" height="16" fill="#a78bfa" stroke="#7c3aed" stroke-width="1" rx="4"/>
+    <text x="283" y="80" text-anchor="middle" font-size="9" fill="#4c1d95">~800 MB</text>
+    <text x="283" y="110" text-anchor="middle" font-size="9" fill="#64748b">HAT</text>
+    <text x="283" y="122" text-anchor="middle" font-size="9" fill="#64748b">BF16 ✓</text>
+
+    <!-- Bar 3: ESRGAN 4x -->
+    <rect x="336" y="77" width="70" height="23" fill="#93c5fd" stroke="#3b82f6" stroke-width="1" rx="4"/>
+    <text x="371" y="73" text-anchor="middle" font-size="9" fill="#1e40af">~1.2 GB</text>
+    <text x="371" y="110" text-anchor="middle" font-size="9" fill="#64748b">ESRGAN</text>
+    <text x="371" y="122" text-anchor="middle" font-size="9" fill="#64748b">4x FP16</text>
+
+    <!-- Bar 4: ESRGAN Lite -->
+    <rect x="424" y="92" width="70" height="8" fill="#6ee7b7" stroke="#10b981" stroke-width="1" rx="4"/>
+    <text x="459" y="88" text-anchor="middle" font-size="9" fill="#065f46">~400 MB</text>
+    <text x="459" y="110" text-anchor="middle" font-size="9" fill="#64748b">ESRGAN</text>
+    <text x="459" y="122" text-anchor="middle" font-size="9" fill="#64748b">Lite FP16</text>
+
+    <!-- Y axis labels -->
+    <text x="134" y="22" text-anchor="end" font-size="9" fill="#94a3b8">8 GB</text>
+    <text x="134" y="62" text-anchor="end" font-size="9" fill="#94a3b8">4 GB</text>
+    <text x="134" y="102" text-anchor="end" font-size="9" fill="#94a3b8">0</text>
+    <line x1="140" y1="62" x2="145" y2="62" stroke="#cbd5e1"/>
+  </svg>
+
+  <div class="info-box green">
+    <strong>Key insight:</strong> Switching HAT from FP32 → BF16 reduced per-tile VRAM from ~3.4 GB to ~800 MB — a 4.25× reduction — making it feasible on 8 GB consumer GPUs without any quality loss (BF16 has the same exponent range as FP32).
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 6: TILING STRATEGY -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">05</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 5</span>
+      <span class="section-title">Tiling Strategy &amp; Memory Management</span>
+    </div>
+  </div>
+
+  <p>Large images cannot be processed in one pass — a 2048×2048 image through HAT would require ~25 GB of VRAM for intermediate activations. Tiling splits the image into overlapping patches, processes each on the GPU, then stitches the results back seamlessly.</p>
+
+  <!-- Tiling diagram SVG -->
+  <svg viewBox="0 0 540 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:12px 0;">
+
+    <!-- Input image -->
+    <rect x="10" y="30" width="140" height="140" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="80" y="20" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">Input Image (2048×2048)</text>
+
+    <!-- Tile grid overlay on input (4×4 = 16 tiles) -->
+    <line x1="45"  y1="30" x2="45"  y2="170" stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+    <line x1="80"  y1="30" x2="80"  y2="170" stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+    <line x1="115" y1="30" x2="115" y2="170" stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+    <line x1="10"  y1="65"  x2="150" y2="65"  stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+    <line x1="10"  y1="100" x2="150" y2="100" stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+    <line x1="10"  y1="135" x2="150" y2="135" stroke="#7c3aed" stroke-width=".8" opacity=".5"/>
+
+    <!-- Highlighted tile with padding -->
+    <rect x="10" y="30" width="48" height="48" fill="rgba(124,58,237,.15)" stroke="#7c3aed" stroke-width="1.5"/>
+    <rect x="10" y="30" width="55" height="55" fill="none" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="37" y="86" text-anchor="middle" font-size="8" fill="#6d28d9">tile+pad</text>
+
+    <!-- Arrow: input → process -->
+    <line x1="152" y1="100" x2="188" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#a3)"/>
+    <text x="170" y="93" text-anchor="middle" font-size="9" fill="#475569">per tile</text>
+
+    <!-- GPU processing box -->
+    <rect x="192" y="50" width="150" height="100" rx="8" fill="#fef3f2" stroke="#ef4444" stroke-width="1.5"/>
+    <text x="267" y="40" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">GPU Processing (one tile)</text>
+    <text x="267" y="75"  text-anchor="middle" font-size="9.5" fill="#334155">1. Pad to window_size=16</text>
+    <text x="267" y="91"  text-anchor="middle" font-size="9.5" fill="#334155">2. BF16 → CUDA</text>
+    <text x="267" y="107" text-anchor="middle" font-size="9.5" fill="#334155">3. model(tile_in) → 4× tile</text>
+    <text x="267" y="123" text-anchor="middle" font-size="9.5" fill="#334155">4. empty_cache()</text>
+    <text x="267" y="139" text-anchor="middle" font-size="9.5" fill="#334155">5. counter[0] += 1</text>
+
+    <!-- Arrow: process → output -->
+    <line x1="344" y1="100" x2="380" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#a3)"/>
+    <text x="362" y="93" text-anchor="middle" font-size="9" fill="#475569">stitch</text>
+
+    <!-- Output image -->
+    <rect x="384" y="10" width="148" height="180" rx="6" fill="#f0fdf4" stroke="#10b981" stroke-width="1.5"/>
+    <text x="458" y="202" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">Output (8192×8192)</text>
+
+    <!-- Grid overlay on output -->
+    <line x1="421" y1="10" x2="421" y2="190" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+    <line x1="458" y1="10" x2="458" y2="190" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+    <line x1="495" y1="10" x2="495" y2="190" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+    <line x1="384" y1="55" x2="532" y2="55" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+    <line x1="384" y1="100" x2="532" y2="100" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+    <line x1="384" y1="145" x2="532" y2="145" stroke="#10b981" stroke-width=".6" opacity=".4"/>
+
+    <!-- Done tiles (filled) -->
+    <rect x="384" y="10" width="37" height="45" fill="rgba(16,185,129,.25)" stroke="none"/>
+    <rect x="421" y="10" width="37" height="45" fill="rgba(16,185,129,.25)" stroke="none"/>
+    <rect x="384" y="55" width="37" height="45" fill="rgba(16,185,129,.25)" stroke="none"/>
+    <rect x="421" y="55" width="37" height="45" fill="rgba(124,58,237,.25)" stroke="none"/>
+    <text x="440" y="83" text-anchor="middle" font-size="8" fill="#4c1d95">⟳ active</text>
+  </svg>
+
+  <h3>Overlap &amp; Padding</h3>
+  <p>Each tile is expanded by <code>tile_pad=32</code> pixels on all sides before inference. After inference, only the non-padded center region is placed into the output canvas. This eliminates visible seams at tile boundaries caused by edge artifacts in convolutional/attention layers.</p>
+
+  <div class="card-grid cols-3" style="margin-top:14px;">
+    <div class="card" style="border-color:#a78bfa;">
+      <h4 style="margin-top:0;color:var(--accent);">Tile = 256 px</h4>
+      <p style="font-size:12.5px;margin:0;">~200 MB VRAM per tile. Best for 6 GB GPUs or when running multiple apps simultaneously.</p>
+    </div>
+    <div class="card" style="border-color:#3b82f6;">
+      <h4 style="margin-top:0;color:var(--blue);">Tile = 512 px (default)</h4>
+      <p style="font-size:12.5px;margin:0;">~800 MB for HAT. Recommended for 8 GB GPUs — good balance of speed and safety.</p>
+    </div>
+    <div class="card" style="border-color:#10b981;">
+      <h4 style="margin-top:0;color:var(--green);">Tile = 1024 px</h4>
+      <p style="font-size:12.5px;margin:0;">~3 GB for HAT. Only suitable for 12+ GB GPUs. Faster due to fewer tile overheads.</p>
+    </div>
+  </div>
+
+  <div class="spacer-sm"></div>
+
+  <h3>CUDA Memory Management</h3>
+  <p>PyTorch's CUDA allocator retains freed tensors in a pool for reuse. Without explicit release, this pool grows across tiles and can exhaust physical VRAM mid-batch. Two mitigations are applied:</p>
+
+  <pre>torch.cuda.empty_cache()   # before inference — clear any stale pool
+# ... inference ...
+del tile_in                # free input tensor reference
+torch.cuda.empty_cache()   # after each tile — prevent pool accumulation</pre>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 7: PRECISION STRATEGY -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">06</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 6</span>
+      <span class="section-title">Numerical Precision Strategy</span>
+    </div>
+  </div>
+
+  <p>Choosing the wrong floating-point format for inference causes silent numerical failures. This section documents the precision decisions, the bugs they solve, and the hardware requirements.</p>
+
+  <!-- FP format comparison SVG -->
+  <svg viewBox="0 0 540 160" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:14px 0;">
+
+    <text x="270" y="14" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">Floating-Point Format Comparison (32-bit footprint = FP32, 16-bit = FP16 / BF16)</text>
+
+    <!-- FP32 row -->
+    <text x="30" y="45" font-size="10" font-weight="700" fill="#334155">FP32</text>
+    <!-- Sign -->
+    <rect x="70" y="32" width="20" height="22" rx="3" fill="#94a3b8" stroke="#64748b" stroke-width="1"/>
+    <text x="80" y="47" text-anchor="middle" font-size="8" fill="white">S</text>
+    <!-- Exponent (8 bits) -->
+    <rect x="92" y="32" width="80" height="22" rx="3" fill="#ef4444" stroke="#b91c1c" stroke-width="1"/>
+    <text x="132" y="47" text-anchor="middle" font-size="8" fill="white">Exponent (8 bits)</text>
+    <!-- Mantissa (23 bits) -->
+    <rect x="174" y="32" width="230" height="22" rx="3" fill="#3b82f6" stroke="#1d4ed8" stroke-width="1"/>
+    <text x="289" y="47" text-anchor="middle" font-size="8" fill="white">Mantissa (23 bits)</text>
+    <text x="415" y="45" font-size="9" fill="#64748b">Max: 3.4×10³⁸</text>
+
+    <!-- FP16 row -->
+    <text x="30" y="90" font-size="10" font-weight="700" fill="#334155">FP16</text>
+    <rect x="70" y="77" width="20" height="22" rx="3" fill="#94a3b8" stroke="#64748b" stroke-width="1"/>
+    <text x="80" y="92" text-anchor="middle" font-size="8" fill="white">S</text>
+    <rect x="92" y="77" width="50" height="22" rx="3" fill="#ef4444" stroke="#b91c1c" stroke-width="1"/>
+    <text x="117" y="92" text-anchor="middle" font-size="8" fill="white">Exp (5b)</text>
+    <rect x="144" y="77" width="100" height="22" rx="3" fill="#3b82f6" stroke="#1d4ed8" stroke-width="1"/>
+    <text x="194" y="92" text-anchor="middle" font-size="8" fill="white">Mantissa (10 bits)</text>
+    <text x="300" y="90" font-size="9" fill="#ef4444" font-weight="600">Max: 65504 ← OVERFLOW RISK</text>
+    <line x1="295" y1="92" x2="365" y2="92" stroke="#ef4444" stroke-width="1"/>
+
+    <!-- BF16 row -->
+    <text x="30" y="135" font-size="10" font-weight="700" fill="#334155">BF16</text>
+    <rect x="70" y="122" width="20" height="22" rx="3" fill="#94a3b8" stroke="#64748b" stroke-width="1"/>
+    <text x="80" y="137" text-anchor="middle" font-size="8" fill="white">S</text>
+    <rect x="92" y="122" width="80" height="22" rx="3" fill="#ef4444" stroke="#b91c1c" stroke-width="1"/>
+    <text x="132" y="137" text-anchor="middle" font-size="8" fill="white">Exponent (8 bits)</text>
+    <rect x="174" y="122" width="70" height="22" rx="3" fill="#3b82f6" stroke="#1d4ed8" stroke-width="1"/>
+    <text x="209" y="137" text-anchor="middle" font-size="8" fill="white">Mantissa (7b)</text>
+    <text x="305" y="135" font-size="9" fill="#10b981" font-weight="600">Max: 3.4×10³⁸ ← SAFE</text>
+    <text x="400" y="135" font-size="9" fill="#64748b">½ storage of FP32</text>
+
+    <!-- Bracket -->
+    <line x1="60" y1="77" x2="60" y2="145" stroke="#7c3aed" stroke-width="2"/>
+    <text x="55" y="115" text-anchor="end" font-size="9" fill="#7c3aed" transform="rotate(-90,55,115)">both 16-bit</text>
+  </svg>
+
+  <h3>Why HAT Overflows in FP16</h3>
+  <p>HAT's Window Attention layer computes attention scores as <strong>Q × Kᵀ / √d</strong>. With d=30 (head dimension), scores can reach values of ±300 before softmax. In FP16, <code>exp(300)</code> overflows to <code>inf</code>, and <code>inf / sum(inf)</code> produces <code>NaN</code>. NaN propagates through the entire remaining forward pass, producing a black output image.</p>
+
+  <div class="info-box amber">
+    <strong>The symptom:</strong> Output PNG is 84 KB (solid black). <code>numpy</code>'s <code>astype(np.uint8)</code> silently converts NaN to 0, so the error isn't raised — it just produces black pixels.
+  </div>
+
+  <p>BF16 solves this by keeping the full 8-bit exponent of FP32 (same dynamic range, max ~3.4×10³⁸), while reducing the mantissa from 23 to 7 bits. The lower mantissa precision is acceptable for inference — the quality difference is imperceptible.</p>
+
+  <div class="card-grid cols-3" style="margin-top:14px;">
+    <div class="card" style="border-color:#ef4444;">
+      <h4 style="margin-top:0;color:var(--red);">FP16 on HAT</h4>
+      <p style="font-size:12.5px;margin:0;">Attention score overflow → NaN → black output. Unusable for HAT.</p>
+    </div>
+    <div class="card" style="border-color:#10b981;">
+      <h4 style="margin-top:0;color:var(--green);">BF16 on HAT (Ampere+)</h4>
+      <p style="font-size:12.5px;margin:0;">Full FP32 exponent range, no overflow. RTX 3000/4000 series support BF16 natively.</p>
+    </div>
+    <div class="card" style="border-color:#3b82f6;">
+      <h4 style="margin-top:0;color:var(--blue);">FP32 on HAT (fallback)</h4>
+      <p style="font-size:12.5px;margin:0;">Correct numerics but 2× VRAM and ~3.4 GB per 512-tile → OOM on 8 GB GPU.</p>
+    </div>
+  </div>
+
+  <div class="spacer-sm"></div>
+
+  <table>
+    <thead>
+      <tr><th>GPU Generation</th><th>Compute Cap</th><th>BF16 Support</th><th>HAT Precision Used</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>RTX 4000 series (Ada)</td><td>sm_89</td><td><span class="badge badge-green">Yes</span></td><td>BF16</td></tr>
+      <tr><td>RTX 3000 series (Ampere)</td><td>sm_80/86</td><td><span class="badge badge-green">Yes</span></td><td>BF16</td></tr>
+      <tr><td>RTX 2000 / GTX 1600 (Turing)</td><td>sm_75</td><td><span class="badge badge-red">No</span></td><td>FP16 (risk)</td></tr>
+      <tr><td>CPU</td><td>—</td><td><span class="badge badge-amber">Emulated</span></td><td>FP32</td></tr>
+    </tbody>
+  </table>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 8: API REFERENCE -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">07</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 7</span>
+      <span class="section-title">API Reference</span>
+    </div>
+  </div>
+
+  <p>All endpoints are served on <code>http://127.0.0.1:7860</code>. The UI is a thin client over these REST + SSE endpoints — they can also be used programmatically.</p>
+
+  <!-- Endpoint cards -->
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px;">
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-blue" style="font-size:10px;padding:3px 8px;">GET</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/</code>
+        <span style="color:var(--muted);font-size:12px;">Returns the complete UI HTML page</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-green" style="font-size:10px;padding:3px 8px;">POST</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/upscale</code>
+        <span style="color:var(--muted);font-size:12px;">Start single-image upscale task</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Request (multipart/form-data)</p>
+          <table style="font-size:11.5px;margin:0;">
+            <tr><td style="padding:3px 8px;"><code>file</code></td><td style="padding:3px 8px;">Image file (JPG/PNG/WebP)</td></tr>
+            <tr><td style="padding:3px 8px;"><code>model</code></td><td style="padding:3px 8px;">Model name string</td></tr>
+            <tr><td style="padding:3px 8px;"><code>tile</code></td><td style="padding:3px 8px;">0 / 256 / 512 / 1024</td></tr>
+          </table>
+        </div>
+        <div>
+          <p style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Response (JSON)</p>
+          <pre style="font-size:11px;padding:8px;margin:0;">{"task_id": "uuid-v4"}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-blue" style="font-size:10px;padding:3px 8px;">GET</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/progress/{task_id}</code>
+        <span style="color:var(--muted);font-size:12px;">SSE stream — real-time progress</span>
+      </div>
+      <pre style="font-size:11px;padding:8px;margin:0;">{
+  "progress": 45,          // 0–100 percent
+  "label": "Upscaling… tile 6/36",
+  "done": false,
+  "error": false,
+  "current_tile": 6,       // tiles completed
+  "total_tiles": 36,       // total tiles for this image
+  "input_size": "512×512",   // present when done=true
+  "output_size": "2048×2048",
+  "scale": 4
+}</pre>
+    </div>
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-blue" style="font-size:10px;padding:3px 8px;">GET</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/result/{task_id}</code>
+        <span style="color:var(--muted);font-size:12px;">Download upscaled PNG</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-green" style="font-size:10px;padding:3px 8px;">POST</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/batch</code>
+        <span style="color:var(--muted);font-size:12px;">Start batch folder processing</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <table style="font-size:11.5px;margin:0;">
+          <tr><td style="padding:3px 8px;"><code>in_folder</code></td><td style="padding:3px 8px;">Absolute path to source folder</td></tr>
+          <tr><td style="padding:3px 8px;"><code>out_folder</code></td><td style="padding:3px 8px;">Absolute path to output folder</td></tr>
+          <tr><td style="padding:3px 8px;"><code>model</code></td><td style="padding:3px 8px;">Model name string</td></tr>
+          <tr><td style="padding:3px 8px;"><code>tile</code></td><td style="padding:3px 8px;">0 / 256 / 512 / 1024</td></tr>
+        </table>
+        <pre style="font-size:11px;padding:8px;margin:0;">{"task_id": "uuid-v4"}</pre>
+      </div>
+    </div>
+
+    <div class="card" style="padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="badge badge-blue" style="font-size:10px;padding:3px 8px;">GET</span>
+        <code style="font-size:13px;background:none;border:none;color:var(--ink);padding:0;">/batch-progress/{task_id}</code>
+        <span style="color:var(--muted);font-size:12px;">SSE stream — batch progress + image preview</span>
+      </div>
+      <pre style="font-size:11px;padding:8px;margin:0;">{
+  "progress": 35,  "label": "Processing 4/10: photo.jpg",
+  "done": false,   "error": false,
+  "total": 10,     "done_count": 3,
+  "current_tile": 4,      "total_tiles": 36,
+  "current_img_b64": "...",   // JPEG thumbnail, base64
+  "current_img_name": "photo.jpg",
+  "new_logs": [{"msg": "photo.jpg", "status": "processing", "ts": 1234}]
+}</pre>
+    </div>
+
+  </div>
+
+</div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 9: UI/UX + ISSUES -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="page">
+<div class="page-inner">
+
+  <div class="section-header">
+    <div class="section-num">08</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 8</span>
+      <span class="section-title">UI / UX Design</span>
+    </div>
+  </div>
+
+  <div class="card-grid cols-2">
+    <div>
+      <h3>Design Principles</h3>
+      <ul style="padding-left:16px;color:var(--ink3);font-size:13px;line-height:2;">
+        <li><strong>Zero install UX</strong> — auto-opens browser on startup</li>
+        <li><strong>Progressive disclosure</strong> — batch tab hidden until needed</li>
+        <li><strong>Live feedback</strong> — every tile update streams instantly via SSE</li>
+        <li><strong>No dead time</strong> — skeletons + spinners fill every wait state</li>
+        <li><strong>Comparison slider</strong> — drag-based, no button clicks needed</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Technology Choices</h3>
+      <ul style="padding-left:16px;color:var(--ink3);font-size:13px;line-height:2;">
+        <li><strong>No JS framework</strong> — plain ES2020, zero build step</li>
+        <li><strong>No Tailwind CDN</strong> — self-contained CSS variables</li>
+        <li><strong>SSE over WebSocket</strong> — simpler, one-directional, HTTP/1.1 compatible</li>
+        <li><strong>Inline HTML template</strong> — single file, no static file serving</li>
+        <li><strong>CSS grid for tile viz</strong> — dynamic column count from JS</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="spacer-md"></div>
+
+  <!-- UI component diagram -->
+  <svg viewBox="0 0 540 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;margin:8px 0;">
+    <text x="270" y="14" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">UI Layout — Single Image Mode</text>
+
+    <!-- Sidebar -->
+    <rect x="0" y="20" width="140" height="156" rx="6" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.5"/>
+    <rect x="0" y="20" width="140" height="22" rx="6" fill="#7c3aed"/>
+    <rect x="0" y="34" width="140" height="8" fill="#7c3aed"/>
+    <text x="70" y="34" text-anchor="middle" font-size="9" font-weight="700" fill="white">Sidebar (310px)</text>
+    <rect x="8" y="52" width="124" height="16" rx="4" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="70" y="64" text-anchor="middle" font-size="8.5" fill="#64748b">Drop zone / thumbnail</text>
+    <rect x="8" y="74" width="124" height="14" rx="4" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="70" y="85" text-anchor="middle" font-size="8.5" fill="#64748b">Model select</text>
+    <rect x="8" y="94" width="124" height="14" rx="4" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="70" y="105" text-anchor="middle" font-size="8.5" fill="#64748b">Tile size select</text>
+    <rect x="8" y="114" width="124" height="18" rx="4" fill="#7c3aed"/>
+    <text x="70" y="127" text-anchor="middle" font-size="8.5" font-weight="700" fill="white">Upscale Image</text>
+    <rect x="8" y="138" width="124" height="8" rx="4" fill="#ede9fe" stroke="#a78bfa" stroke-width="1"/>
+    <text x="70" y="146" text-anchor="middle" font-size="8" fill="#6d28d9">Progress bar</text>
+    <rect x="8" y="152" width="124" height="18" rx="4" fill="#f0fdf4" stroke="#10b981" stroke-width="1"/>
+    <text x="70" y="165" text-anchor="middle" font-size="8.5" fill="#065f46">Tile grid</text>
+
+    <!-- Main area -->
+    <rect x="148" y="20" width="388" height="156" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="148" y="20" width="192" height="156" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="244" y="100" text-anchor="middle" font-size="10" fill="#94a3b8">Before</text>
+
+    <rect x="342" y="20" width="194" height="156" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="439" y="100" text-anchor="middle" font-size="10" fill="#94a3b8">After / Skeleton</text>
+
+    <!-- Slider handle -->
+    <line x1="340" y1="20" x2="340" y2="176" stroke="rgba(0,0,0,.15)" stroke-width="2"/>
+    <circle cx="340" cy="98" r="8" fill="white" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="340" y="102" text-anchor="middle" font-size="8" fill="#64748b">⇆</text>
+    <text x="340" y="188" text-anchor="middle" font-size="9" fill="#94a3b8">Comparison slider (after result)</text>
+  </svg>
+
+  <div class="spacer-md"></div>
+
+  <div class="section-header">
+    <div class="section-num">09</div>
+    <div class="section-title-wrap">
+      <span class="section-label">Section 9</span>
+      <span class="section-title">Known Issues &amp; Solutions</span>
+    </div>
+  </div>
+
+  <table style="margin-top:10px;">
+    <thead>
+      <tr><th>Symptom</th><th>Root Cause</th><th>Fix Applied</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Black output image</strong></td>
+        <td>FP16 softmax overflow → NaN in HAT attention</td>
+        <td>Switch HAT to BF16 on Ampere+ GPUs</td>
+      </tr>
+      <tr>
+        <td><strong>CUDA OOM (11+ GB)</strong></td>
+        <td>FP32 HAT at 512-tile + PyTorch pool accumulation</td>
+        <td>BF16 + <code>empty_cache()</code> after each tile</td>
+      </tr>
+      <tr>
+        <td><strong>dtype mismatch error</strong></td>
+        <td><code>_calc_mask</code> in hat_arch.py returns FP32; model is BF16</td>
+        <td>Cast mask: <code>.to(device=x.device, dtype=x.dtype)</code></td>
+      </tr>
+      <tr>
+        <td><strong>ModuleNotFoundError: einops</strong></td>
+        <td>Not in requirements.txt originally</td>
+        <td><code>pip install einops</code>; added to requirements.txt</td>
+      </tr>
+      <tr>
+        <td><strong>HTTP 404 downloading HAT</strong></td>
+        <td>Wrong HuggingFace repo path</td>
+        <td>Changed URL to <code>hfmaster/models-moved</code></td>
+      </tr>
+      <tr>
+        <td><strong>basicsr build failure</strong></td>
+        <td>Python 3.13 removed deprecated APIs used by basicsr</td>
+        <td>Use Python 3.10 or 3.11; install from git with <code>--no-build-isolation</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+</div>
+</div>
+
+</body>
+</html>
