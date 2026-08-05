@@ -1070,21 +1070,31 @@ aside {
 
     <!-- Batch overall progress -->
     <div id="b-prog-wrap" style="display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div id="b-prog-spinner" class="spinner" style="display:none;"></div>
-          <span id="b-prog-lbl" style="font-size:12px;color:var(--text2);"></span>
-        </div>
-        <span id="b-count-lbl"
-          style="font-size:12px;font-family:ui-monospace,Consolas,monospace;font-weight:700;color:var(--accent2);"></span>
+      <!-- Status row: spinner + truncated label only -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;min-width:0;">
+        <div id="b-prog-spinner" class="spinner" style="display:none;flex-shrink:0;"></div>
+        <span id="b-prog-lbl"
+          style="font-size:12px;color:var(--text2);
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;"></span>
       </div>
       <div class="prog-track"><div id="b-prog-fill" class="prog-fill" style="width:0%"></div></div>
+
+      <!-- Completed count card -->
+      <div style="margin-top:10px;padding:10px 14px;background:rgba(255,255,255,.03);
+                  border:1px solid var(--border);border-radius:10px;
+                  display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:10px;font-weight:700;letter-spacing:.09em;
+                     text-transform:uppercase;color:var(--text3);">Completed</span>
+        <span id="b-count-lbl"
+          style="font-size:16px;font-family:ui-monospace,Consolas,monospace;
+                 font-weight:700;color:var(--accent2);letter-spacing:-.01em;"></span>
+      </div>
 
       <!-- Per-image tile progress -->
       <div id="b-tile-prog-wrap" class="tile-grid-card" style="display:none;">
         <div class="tile-grid-header">
           <span class="tile-grid-title">Image Tiles</span>
-          <span id="b-tile-counter" class="tile-counter"></span>
+          <span id="b-tile-counter" class="tile-counter" style="display:none;"></span>
         </div>
         <div id="b-tile-grid"></div>
       </div>
