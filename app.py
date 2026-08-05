@@ -797,6 +797,7 @@ aside {
   display: flex; align-items: center; justify-content: center;
 }
 .cmp-layer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#cmp-zoom-layer { position:absolute; inset:0; transform-origin:0 0; will-change:transform; }
 #cmp-after-clip { clip-path: inset(0 50% 0 0); }
 .cmp-handle {
   position: absolute; top: 0; bottom: 0; width: 2px; left: 50%;
@@ -1154,15 +1155,28 @@ aside {
     <!-- Comparison slider -->
     <div id="compare-view" style="display:none;height:100%;padding:20px;position:relative;">
       <div id="compare-wrap" class="compare-wrap">
-        <div class="cmp-layer">
-          <img id="cmp-before" style="max-width:100%;max-height:100%;object-fit:contain;">
-          <span class="cmp-badge" style="left:14px;">Before</span>
-        </div>
-        <div class="cmp-layer" id="cmp-after-clip">
-          <img id="cmp-after" style="max-width:100%;max-height:100%;object-fit:contain;">
-          <span class="cmp-badge" style="right:14px;">After</span>
+        <div id="cmp-zoom-layer">
+          <div class="cmp-layer">
+            <img id="cmp-before" style="max-width:100%;max-height:100%;object-fit:contain;">
+            <span class="cmp-badge" style="left:14px;">Before</span>
+          </div>
+          <div class="cmp-layer" id="cmp-after-clip">
+            <img id="cmp-after" style="max-width:100%;max-height:100%;object-fit:contain;">
+            <span class="cmp-badge" style="right:14px;">After</span>
+          </div>
         </div>
         <div class="cmp-handle" id="cmp-handle"></div>
+        <div id="cmp-zoom-badge" style="display:none;position:absolute;top:12px;right:12px;
+          z-index:20;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);
+          border-radius:99px;padding:4px 12px;font-size:11px;font-weight:700;
+          color:rgba(255,255,255,.85);pointer-events:none;transition:opacity .15s;"></div>
+        <div id="cmp-zoom-hint" style="display:none;position:absolute;bottom:52px;
+          left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);
+          backdrop-filter:blur(8px);border-radius:99px;padding:5px 14px;font-size:11px;
+          color:rgba(255,255,255,.7);pointer-events:none;z-index:20;
+          white-space:nowrap;transition:opacity .5s;">
+          Scroll to zoom &nbsp;·&nbsp; Drag to pan &nbsp;·&nbsp; Double-click to reset
+        </div>
       </div>
       <button class="toggle-btn" id="toggle-btn" onclick="toggleView()">
         ⇄ Side-by-side
@@ -1231,6 +1245,9 @@ let selectedFile = null, taskId = null, evtSrc = null;
 let hasResult = false, viewMode = 'side';
 let batchEvtSrc = null;
 let _sliderDragging = false;
+let _cmpZoom = 1, _cmpTx = 0, _cmpTy = 0;
+let _cmpPanning = false, _cmpPanSX = 0, _cmpPanSY = 0, _cmpPanTx0 = 0, _cmpPanTy0 = 0;
+let _splitFrac = 0.5;
 
 // ── File handling ──────────────────────────────────────────────────────────
 const dropZone = document.getElementById('drop-zone');
@@ -1433,23 +1450,129 @@ function initSlider() {
   const wrap   = document.getElementById('compare-wrap');
   const clip   = document.getElementById('cmp-after-clip');
   const handle = document.getElementById('cmp-handle');
+  const zl     = document.getElementById('cmp-zoom-layer');
+  const badge  = document.getElementById('cmp-zoom-badge');
+  const hint   = document.getElementById('cmp-zoom-hint');
 
-  function setPos(x) {
-    const r = wrap.getBoundingClientRect();
-    const p = Math.max(5, Math.min(95, (x - r.left) / r.width * 100));
-    clip.style.clipPath = 'inset(0 ' + (100 - p) + '% 0 0)';
-    handle.style.left = p + '%';
+  // Reset state
+  _cmpZoom = 1; _cmpTx = 0; _cmpTy = 0; _splitFrac = 0.5;
+  zl.style.transform = '';
+  wrap.style.cursor = '';
+
+  // Show scroll-to-zoom hint briefly
+  hint.style.display = '';
+  hint.style.opacity = '1';
+  setTimeout(() => { hint.style.opacity = '0'; }, 2500);
+  setTimeout(() => { hint.style.display = 'none'; }, 3100);
+
+  function clampPan() {
+    _cmpTx = Math.min(0, Math.max(wrap.clientWidth  * (1 - _cmpZoom), _cmpTx));
+    _cmpTy = Math.min(0, Math.max(wrap.clientHeight * (1 - _cmpZoom), _cmpTy));
   }
 
-  wrap.onmousedown = e => { _sliderDragging = true; setPos(e.clientX); e.preventDefault(); };
-  window.onmousemove = e => { if (_sliderDragging) setPos(e.clientX); };
-  window.onmouseup = () => { _sliderDragging = false; };
+  function applyTransform() {
+    if (_cmpZoom <= 1) {
+      zl.style.transform = '';
+      handle.style.left = (_splitFrac * wrap.clientWidth) + 'px';
+      badge.style.display = 'none';
+      wrap.style.cursor = '';
+    } else {
+      zl.style.transform = 'translate(' + _cmpTx + 'px,' + _cmpTy + 'px) scale(' + _cmpZoom + ')';
+      const sx = _splitFrac * wrap.clientWidth * _cmpZoom + _cmpTx;
+      handle.style.left = Math.max(0, Math.min(wrap.clientWidth, sx)) + 'px';
+      badge.style.display = '';
+      badge.textContent = _cmpZoom.toFixed(1) + '×';
+    }
+  }
+
+  // Convert screen x → split fraction accounting for current zoom/pan
+  function setPos(clientX) {
+    const r = wrap.getBoundingClientRect();
+    const sx = clientX - r.left;
+    _splitFrac = (sx - _cmpTx) / (wrap.clientWidth * _cmpZoom);
+    _splitFrac = Math.max(0.02, Math.min(0.98, _splitFrac));
+    clip.style.clipPath = 'inset(0 ' + ((1 - _splitFrac) * 100) + '% 0 0)';
+    handle.style.left = Math.max(0, Math.min(wrap.clientWidth, sx)) + 'px';
+  }
+
+  // True if screen x is within 22px of the split handle line
+  function nearHandle(clientX) {
+    const r = wrap.getBoundingClientRect();
+    const sx = clientX - r.left;
+    const hx = _splitFrac * wrap.clientWidth * _cmpZoom + _cmpTx;
+    return Math.abs(sx - hx) < 22;
+  }
+
+  wrap.onmousedown = e => {
+    if (_cmpZoom > 1 && !nearHandle(e.clientX)) {
+      _cmpPanning = true;
+      _cmpPanSX = e.clientX; _cmpPanSY = e.clientY;
+      _cmpPanTx0 = _cmpTx;   _cmpPanTy0 = _cmpTy;
+      wrap.style.cursor = 'grabbing';
+    } else {
+      _sliderDragging = true;
+      setPos(e.clientX);
+    }
+    e.preventDefault();
+  };
+
+  wrap.onmousemove = e => {
+    if (!_sliderDragging && !_cmpPanning && _cmpZoom > 1)
+      wrap.style.cursor = nearHandle(e.clientX) ? 'col-resize' : 'grab';
+  };
+
+  window.onmousemove = e => {
+    if (_cmpPanning) {
+      _cmpTx = _cmpPanTx0 + (e.clientX - _cmpPanSX);
+      _cmpTy = _cmpPanTy0 + (e.clientY - _cmpPanSY);
+      clampPan();
+      applyTransform();
+    } else if (_sliderDragging) {
+      setPos(e.clientX);
+    }
+  };
+
+  window.onmouseup = () => {
+    _sliderDragging = false;
+    _cmpPanning = false;
+    if (_cmpZoom > 1) wrap.style.cursor = 'grab';
+  };
+
   wrap.ontouchstart = e => { _sliderDragging = true; setPos(e.touches[0].clientX); };
   window.ontouchmove = e => { if (_sliderDragging) setPos(e.touches[0].clientX); };
   window.ontouchend = () => { _sliderDragging = false; };
 
-  const r = wrap.getBoundingClientRect();
-  setPos(r.left + r.width * 0.5);
+  // Double-click resets zoom
+  wrap.ondblclick = () => {
+    _cmpZoom = 1; _cmpTx = 0; _cmpTy = 0;
+    applyTransform();
+  };
+
+  // Scroll-wheel zoom — centered on cursor position
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r   = wrap.getBoundingClientRect();
+    const mx  = e.clientX - r.left;
+    const my  = e.clientY - r.top;
+    const fac = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const nz  = Math.min(8, Math.max(1, _cmpZoom * fac));
+    if (nz <= 1) {
+      _cmpZoom = 1; _cmpTx = 0; _cmpTy = 0;
+    } else {
+      // Keep content point under cursor fixed in screen space
+      const ratio = nz / _cmpZoom;
+      _cmpTx = mx * (1 - ratio) + _cmpTx * ratio;
+      _cmpTy = my * (1 - ratio) + _cmpTy * ratio;
+      _cmpZoom = nz;
+      clampPan();
+      wrap.style.cursor = 'grab';
+    }
+    applyTransform();
+  }, { passive: false });
+
+  // Initial position
+  clip.style.clipPath = 'inset(0 50% 0 0)';
+  handle.style.left = (wrap.clientWidth * 0.5) + 'px';
 }
 
 // ── Tab switching ──────────────────────────────────────────────────────────
